@@ -1287,65 +1287,13 @@ async def user_info_command(interaction: discord.Interaction):
 
 
 # Command: View system stats (slash command)
-@bot.tree.command(name="system_stats", description="Xem thông số kỹ thuật máy chủ và trạng thái bot")
+@bot.tree.command(name="system_stats", description="Xem thông số kỹ thuật máy chủ và trạng thái bot thời gian thực")
 async def system_stats(interaction: discord.Interaction):
-    # Calculate Uptime
-    uptime_seconds = int(time.time() - bot_start_time)
-    uptime_days = uptime_seconds // 86400
-    uptime_hours = (uptime_seconds % 86400) // 3600
-    uptime_mins = (uptime_seconds % 3600) // 60
-    uptime_secs = uptime_seconds % 60
-    
-    uptime_str = ""
-    if uptime_days > 0:
-        uptime_str += f"{uptime_days} ngày "
-    if uptime_hours > 0 or uptime_days > 0:
-        uptime_str += f"{uptime_hours} giờ "
-    uptime_str += f"{uptime_mins} phút {uptime_secs} giây"
-
-    # CPU and RAM Usage
-    if psutil:
-        try:
-            cpu_usage = psutil.cpu_percent(interval=None)
-            ram = psutil.virtual_memory()
-            ram_usage = ram.percent
-            ram_used_gb = ram.used / (1024 ** 3)
-            ram_total_gb = ram.total / (1024 ** 3)
-            ram_str = f"{ram_usage}% ({ram_used_gb:.1f} GB / {ram_total_gb:.1f} GB)"
-        except Exception:
-            cpu_usage = "N/A"
-            ram_str = "N/A"
-    else:
-        cpu_usage = "Không khả dụng (Thiếu psutil)"
-        ram_str = "Không khả dụng (Thiếu psutil)"
-
-    embed = discord.Embed(
-        title="🖥️ Trạng Thái Máy Chủ & Hiệu Suất Bot",
-        color=discord.Color.dark_gray(),
-        timestamp=discord.utils.utcnow()
-    )
-    embed.set_author(name=bot.user.name, icon_url=bot.user.display_avatar.url)
-
-    # Bot metrics
-    active_sessions = len(config.ACTIVE_USERS)
-    from limits_manager import load_limits
-    limits_data = load_limits()
-    total_completed = limits_data.get("total_completed", config.TOTAL_COMPLETED)
-    total_failed = limits_data.get("total_failed", config.TOTAL_FAILED)
-
-    embed.add_field(name="🤖 Bot Uptime", value=f"`{uptime_str}`", inline=False)
-    embed.add_field(name="👥 Phiên đang chạy", value=f"`{active_sessions} tài khoản`", inline=True)
-    embed.add_field(name="✅ Quest Hoàn Thành", value=f"`{total_completed}`", inline=True)
-    embed.add_field(name="❌ Quest Thất Bại", value=f"`{total_failed}`", inline=True)
-
-    # Hardware metrics
-    embed.add_field(name="🖥️ Hệ điều hành", value=f"`{platform.system()} {platform.release()}`", inline=False)
-    embed.add_field(name="⚡ Tốc độ CPU", value=f"`{cpu_usage}%`", inline=True)
-    embed.add_field(name="💾 Dung lượng RAM", value=f"`{ram_str}`", inline=True)
-    embed.add_field(name="🐍 Phiên bản Python", value=f"`{platform.python_version()}`", inline=True)
-
-    embed.set_footer(text="Quest Bot v4.0 • Thống kê hiệu năng phần cứng")
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.defer()
+    from system_info import build_system_embed, SystemStatsView
+    embed = build_system_embed(bot, bot_start_time)
+    view = SystemStatsView(bot, bot_start_time)
+    await interaction.followup.send(embed=embed, view=view)
 
 
 # Command: Stop active session for calling user (slash command)

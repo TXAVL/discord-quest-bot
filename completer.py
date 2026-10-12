@@ -42,12 +42,17 @@ class QuestAutocompleter:
         self.stop_event.set()
         await self.api.close()
 
-    async def claim_reward(self, quest_id: str) -> dict:
+    async def claim_reward(self, quest_id: str, platform: int = 0) -> dict:
         """Gửi yêu cầu nhận quà tặng cho một quest đã hoàn thành."""
         try:
             r = await self.api.post(f"/quests/{quest_id}/claim-reward", {
+                "platform": platform,
                 "location": 11,
-                "platform": "pc"
+                "is_targeted": False,
+                "metadata_raw": None,
+                "metadata_sealed": None,
+                "traffic_metadata_raw": None,
+                "traffic_metadata_sealed": None
             })
             if r.status == 200:
                 return await r.json()
