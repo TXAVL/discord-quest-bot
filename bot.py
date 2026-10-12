@@ -112,19 +112,97 @@ Kéo thả trực tiếp file `TXA_Discord_Token_Retriever.crx` vào trang `chro
 
 
 class DMProgressView(discord.ui.View):
-    def __init__(self, completer=None):
+    def __init__(self, completer=None, user_id=None, status_callback=None):
         super().__init__(timeout=None)
         self.completer = completer
+        self.user_id = user_id
+        self.status_callback = status_callback
 
-    @discord.ui.button(label="Dừng", style=discord.ButtonStyle.danger, emoji="🟥", custom_id="btn_stop_quest")
+    @discord.ui.button(label="Dừng Lại", style=discord.ButtonStyle.danger, emoji="🛑", custom_id="btn_stop_quest", row=0)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         if self.completer:
             await self.completer.stop()
-            # The status_callback will handle updating the UI and disabling the button
             if self.completer.status_callback:
                 await self.completer.status_callback("🛑 Đã dừng tiến trình.", finished=False)
-            await interaction.followup.send("🛑 Đã dừng tiến trình làm quest của bạn.", ephemeral=True)
+            await interaction.followup.send("🛑 Đã dừng phiên làm quest của bạn.", ephemeral=True)
+
+    @discord.ui.button(label="Làm Mới", style=discord.ButtonStyle.primary, emoji="🔄", custom_id="btn_refresh_quest", row=0)
+    async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        if self.status_callback:
+            await self.status_callback("Đang làm mới...")
+
+    def update_claim_buttons(self, unclaimed_quests: dict):
+        """Tự động thêm nút nhận quà trực tiếp ngay trong tin nhắn DM."""
+        current_claim_ids = {str(c.custom_id) for c in self.children if c.custom_id and c.custom_id.startswith("dm_claim_")}
+        
+        for qid, qname in unclaimed_quests.items():
+            btn_id = f"dm_claim_{qid}"
+            if btn_id not in current_claim_ids and len(self.children) < 25:
+                row_idx = 1 if len([c for c in self.children if getattr(c, 'row', 0) == 1]) < 5 else 2
+                btn = discord.ui.Button(
+                    label=f"Nhận: {qname[:14]}",
+                    style=discord.ButtonStyle.success,
+                    emoji="🎁",
+                    custom_id=btn_id,
+                    row=row_idx
+                )
+                btn.callback = self.make_claim_callback(qid, qname)
+                self.add_item(btn)
+
+    def make_claim_callback(self, quest_id, quest_name):
+        async def callback(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
+            if not self.completer:
+                await interaction.followup.send("❌ Không tìm thấy thông tin phiên làm quest.", ephemeral=True)
+                return
+
+            res = await self.completer.claim_reward(quest_id)
+            if "error" in res:
+                err_msg = res.get("details", res["error"])
+                await interaction.followup.send(
+                    f"❌ **Lỗi khi nhận thưởng từ Discord:**\n"
+                    f"Nhiệm vụ: **{quest_name}**\n"
+                    f"Chi tiết: `{err_msg}`",
+                    ephemeral=True
+                )
+            else:
+                code = res.get("code")
+                if code:
+                    embed = discord.Embed(
+                        title="🎉 Nhận Quà Thành Công!",
+                        color=discord.Color.green(),
+                        description=(
+                            f"Nhiệm vụ: **{quest_name}**\n\n"
+                            f"🔑 **Mã quà tặng (Promo Code):**\n"
+                            f"```\n{code}\n```\n"
+                            f"💡 *Sao chép mã trên và kích hoạt trong Gift Inventory hoặc trong game.*"
+                        )
+                    )
+                else:
+                    embed = discord.Embed(
+                        title="🎉 Nhận Quà Thành Công!",
+                        color=discord.Color.green(),
+                        description=(
+                            f"Nhiệm vụ: **{quest_name}**\n\n"
+                            f"✨ *Phần thưởng đã được kích hoạt trực tiếp vào tài khoản Discord của bạn!*"
+                        )
+                    )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+                for child in self.children:
+                    if isinstance(child, discord.ui.Button) and child.custom_id == f"dm_claim_{quest_id}":
+                        child.disabled = True
+                        child.label = f"Đã nhận: {quest_name[:10]}"
+                        child.style = discord.ButtonStyle.secondary
+                        break
+                try:
+                    await interaction.message.edit(view=self)
+                except Exception:
+                    pass
+
+        return callback
 
 class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer"):
     token_input = discord.ui.TextInput(
@@ -202,17 +280,27 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
             return
 
         # Initialize view
-        view = DMProgressView()
+        view = DMProgressView(user_id=user_id)
 
         # Send initial progress embed in DM
         start_ts = int(time.time())
         embed = discord.Embed(
-            title="🎯 Auto-Quest",
-            color=discord.Color.blue(),
-            description=f"👤 **{user_info.get('username', username)}** · {config.EMOJI_LOADING} Đang kết nối · <t:{start_ts}:R>\n"
+            title="⚡ TIẾN TRÌNH AUTO-QUEST DISCORD",
+            color=discord.Color.from_rgb(88, 101, 242),
+            timestamp=discord.utils.utcnow()
         )
-        current_time = time.strftime("%H:%M %d/%m/%y")
-        embed.set_footer(text=f"{current_time} | Quest Bot v4.0 • Built by TXA")
+        embed.set_author(name=f"Tài khoản: {user_info.get('username', username)}", icon_url=interaction.user.display_avatar.url)
+        embed.add_field(
+            name="📊 Tổng Quan & Trạng Thái",
+            value=(
+                f"• **Trạng thái:** `🚀 Đang khởi động kết nối...`\n"
+                f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
+                f"• **Tiến độ phiên:** `▱▱▱▱▱▱▱▱▱▱` **0%**\n"
+                f"• **Tiến trình:** Đang quét danh sách nhiệm vụ từ tài khoản của bạn..."
+            ),
+            inline=False
+        )
+        embed.set_footer(text="🔄 Tự động cập nhật • TXA Quest Bot v4.0")
         try:
             dm_msg = await dm_channel.send(embed=embed, view=view)
         except Exception as e:
@@ -239,7 +327,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                 quests = []
                 try:
                     if completer:
-                        raw_quests = await completer.fetch_quests()
+                        raw_quests = getattr(completer, "last_quests", None) or await completer.fetch_quests()
                         quests = [
                             q for q in raw_quests 
                             if (is_completed(q) or not is_expired(q)) 
@@ -251,32 +339,66 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                 # Auto-detect finished if all quests are completed
                 if quests and all(is_completed(q) for q in quests):
                     finished = True
+
+                from limits_manager import get_user_total_completed
+                from system_info import make_bar
+                user_total = get_user_total_completed(user_id)
+                user_avatar_url = interaction.user.display_avatar.url
+                user_display_name = user_info.get('username', username)
                 
+                completed_count = sum(1 for q in quests if is_completed(q)) if quests else 0
+                total_count = len(quests) if quests else 0
+
+                # Lấy danh sách quest chưa claim
+                unclaimed_quests = {}
+                for q in quests:
+                    qid = q.get("id")
+                    us = get_user_status(q)
+                    claimed = bool(_get(us, "claimedAt", "claimed_at"))
+                    if is_completed(q) and not claimed:
+                        unclaimed_quests[qid] = get_quest_name(q)
+
+                # Tự động cập nhật các nút nhận quà vào View
+                view.update_claim_buttons(unclaimed_quests)
+
                 if finished:
                     color = discord.Color.green()
-                    completed_count = sum(1 for q in quests if is_completed(q)) if quests else 0
-                    
-                    # Disable stop button
                     for item in view.children:
                         if isinstance(item, discord.ui.Button) and item.custom_id == "btn_stop_quest":
                             item.disabled = True
-                            
-                    from limits_manager import get_user_total_completed
-                    user_total = get_user_total_completed(user_id)
+
                     embed_edit = discord.Embed(
-                        title="🎉 Hoàn thành tất cả Quest!",
+                        title="🎉 TẤT CẢ NHIỆM VỤ ĐÃ HOÀN THÀNH!",
                         color=color,
-                        description=(
-                            f"Đã hoàn thành **{completed_count} quest** trong phiên này 🏆\n"
-                            f"🏆 **Tổng tất cả quest đã hoàn thành:** `{user_total}`\n"
-                            "Phần thưởng sẽ xuất hiện trong mục **Quest** của Discord. Tận hưởng nhé!"
-                        ),
                         timestamp=discord.utils.utcnow()
                     )
-                    
-                    user_avatar_url = interaction.user.display_avatar.url
-                    embed_edit.set_author(name=user_info.get('username', username), icon_url=user_avatar_url)
-                    
+                    embed_edit.set_author(name=f"Tài khoản: {user_display_name}", icon_url=user_avatar_url)
+
+                    embed_edit.add_field(
+                        name="📊 Thống Kê Phiên Này",
+                        value=(
+                            f"• **Trạng thái:** `🟢 Hoàn thành 100%`\n"
+                            f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
+                            f"• **Số quest hoàn tất:** `✅ {completed_count}/{total_count} nhiệm vụ`\n"
+                            f"• **Tổng quest tích lũy:** `🏆 {user_total} nhiệm vụ`"
+                        ),
+                        inline=False
+                    )
+
+                    if unclaimed_quests:
+                        embed_edit.add_field(
+                            name="🎁 Quà Tặng Chưa Nhận",
+                            value="Nhấn các nút **Nhận Quà** bên dưới để lấy ngay mã quà tặng (Promo Code) hoặc kích hoạt phần thưởng!",
+                            inline=False
+                        )
+                    else:
+                        embed_edit.add_field(
+                            name="✨ Phần Thưởng",
+                            value="Tất cả phần thưởng đã sẵn sàng trong mục **Quest / Gift Inventory** của Discord.",
+                            inline=False
+                        )
+
+                    embed_edit.set_footer(text=f"Hoàn tất lúc {datetime.now().strftime('%H:%M:%S')} • TXA Quest Bot v4.0")
                     await dm_msg.edit(embed=embed_edit, view=view)
 
                     # Gửi tin nhắn thông báo riêng báo đã xong và tự xóa sau 1 phút
@@ -291,77 +413,114 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                                 await asyncio.sleep(60)
                                 await notice_msg.delete()
                             except Exception as notice_err:
-                                log(f"Lỗi khi gửi/xóa tin nhắn thông báo hoàn thành cho user {user_id}: {notice_err}", "warn")
-                        
+                                log(f"Lỗi khi gửi/xóa thông báo hoàn thành: {notice_err}", "warn")
                         asyncio.create_task(send_and_delete_notice())
 
                     return
-                    
-                elif completer.stop_event.is_set():
-                    status_str = "🛑 Đã dừng"
+
+                elif completer and completer.stop_event.is_set():
+                    status_badge = "🛑 Đã dừng tiến trình"
                     color = discord.Color.red()
-                    # Disable stop button
                     for item in view.children:
                         if isinstance(item, discord.ui.Button) and item.custom_id == "btn_stop_quest":
                             item.disabled = True
                 else:
-                    status_str = f"{config.EMOJI_LOADING} Đang chạy"
-                    color = discord.Color.blue()
-                
-                # Format description matching screenshot
-                from limits_manager import get_user_total_completed
-                user_total = get_user_total_completed(user_id)
-                desc_lines = [
-                    f"👤 **{user_info.get('username', username)}** · {status_str} · <t:{start_ts}:R>\n"
-                    f"🏆 **Tổng quest đã hoàn thành:** `{user_total}` nhiệm vụ\n"
-                ]
-                
-                if quests:
-                    completed_count = sum(1 for q in quests if is_completed(q))
-                    total_count = len(quests)
-                    desc_lines.append(f"📋 **Nhiệm vụ ({completed_count}/{total_count} xong)**")
-                    
-                    for q in quests:
-                        name = get_quest_name(q)
-                        task = get_task_type(q) or "?"
-                        qid = q.get("id")
-                        
-                        if is_completed(q):
-                            desc_lines.append(f"{config.EMOJI_SUCCESS} ~~{name}~~")
-                        elif completer and completer.current_quest_id == qid:
-                            # This is the currently active quest! Show the live progress bar and ETA under it.
-                            seconds_needed = get_seconds_needed(q)
-                            seconds_done = get_seconds_done(q)
-                            
-                            remaining = max(0, int(seconds_needed - seconds_done))
-                            if remaining >= 60:
-                                eta_str = f"{remaining // 60}p {remaining % 60}s"
-                            else:
-                                eta_str = f"{remaining}s"
-                                
-                            bar = get_progress_bar(seconds_done, seconds_needed)
-                            desc_lines.append(
-                                f"{config.EMOJI_LOADING} **{name}** ({seconds_done:.0f}/{seconds_needed}s) - ⏳ Còn lại: {eta_str}\n"
-                                f"└─ `{bar}`"
-                            )
-                        elif is_enrolled(q):
-                            # Enrolled but waiting/queued (not the active one)
-                            desc_lines.append(f"⚪ {name} `[{task}]` (Đang chờ)")
-                        else:
-                            # Not enrolled yet
-                            desc_lines.append(f"⚪ {name} `[{task}]`")
-                else:
-                    desc_lines.append(status_text)
-                
+                    status_badge = "🚀 Đang thực hiện"
+                    color = discord.Color.from_rgb(88, 101, 242)
+
+                overall_ratio = (completed_count / total_count * 100) if total_count > 0 else 0
+                overall_bar = make_bar(overall_ratio, length=10)
+
                 embed_edit = discord.Embed(
-                    title="🎯 Auto-Quest",
+                    title="⚡ TIẾN ĐỘ AUTO-QUEST DISCORD",
                     color=color,
-                    description="\n".join(desc_lines)
+                    timestamp=discord.utils.utcnow()
                 )
-                
-                cur_time = time.strftime("%H:%M %d/%m/%y")
-                embed_edit.set_footer(text=f"{cur_time} | Quest Bot v4.0 • Built by TXA")
-                
+                embed_edit.set_author(name=f"Tài khoản: {user_display_name}", icon_url=user_avatar_url)
+
+                # Khối 1: Tổng quan
+                embed_edit.add_field(
+                    name="📊 Tổng Quan & Trạng Thái",
+                    value=(
+                        f"• **Trạng thái:** `{status_badge}`\n"
+                        f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
+                        f"• **Tiến độ phiên:** `{overall_bar}` **{overall_ratio:.0f}%** ({completed_count}/{total_count} xong)\n"
+                        f"• **Tổng quest tích lũy:** `🏆 {user_total} nhiệm vụ`"
+                    ),
+                    inline=False
+                )
+
+                # Khối 2: Nhiệm vụ đang chạy (nếu có)
+                active_q = None
+                if completer and completer.current_quest_id and quests:
+                    for q in quests:
+                        if q.get("id") == completer.current_quest_id:
+                            active_q = q
+                            break
+
+                if active_q:
+                    active_name = get_quest_name(active_q)
+                    active_task = get_task_type(active_q) or "?"
+                    task_label = {
+                        "WATCH_VIDEO": "🎬 Xem Video",
+                        "PLAY_ON_DESKTOP": "🖥️ Chơi Game Desktop",
+                        "STREAM_ON_DESKTOP": "📡 Stream Game Desktop",
+                        "PLAY_ACTIVITY": "🕹️ Chơi Discord Activity"
+                    }.get(active_task, f"🎮 {active_task}")
+
+                    needed = get_seconds_needed(active_q)
+                    done = get_seconds_done(active_q)
+                    if hasattr(completer, "current_quest_info") and completer.current_quest_info:
+                        done = max(done, completer.current_quest_info.get("done", done))
+                        needed = max(needed, completer.current_quest_info.get("needed", needed))
+
+                    pct = (done / needed * 100) if needed > 0 else 0
+                    quest_bar = make_bar(pct, length=10)
+                    remaining = max(0, int(needed - done))
+                    eta_text = f"{remaining // 60}p {remaining % 60}s" if remaining >= 60 else f"{remaining}s"
+
+                    embed_edit.add_field(
+                        name="⚡ Nhiệm Vụ Đang Xử Lý",
+                        value=(
+                            f"• **Nhiệm vụ:** **{active_name}**\n"
+                            f"• **Loại hình:** `{task_label}`\n"
+                            f"• **Tiến độ:** `{quest_bar}` **{pct:.0f}%** (`{done:.0f}s / {needed}s`)\n"
+                            f"• **Thời gian còn lại:** `⏳ ~{eta_text}`"
+                        ),
+                        inline=False
+                    )
+
+                # Khối 3: Danh sách nhiệm vụ
+                if quests:
+                    quest_lines = []
+                    for q in quests:
+                        q_name = get_quest_name(q)
+                        q_task = get_task_type(q) or "?"
+                        q_id = q.get("id")
+                        us = get_user_status(q)
+                        claimed = bool(_get(us, "claimedAt", "claimed_at"))
+
+                        if is_completed(q):
+                            if claimed:
+                                quest_lines.append(f"✅ ~~{q_name}~~ `(Đã nhận)`")
+                            else:
+                                quest_lines.append(f"🎁 **{q_name}** `[Chờ nhận quà]`")
+                        elif completer and completer.current_quest_id == q_id:
+                            quest_lines.append(f"🔄 **{q_name}** `[Đang chạy...]`")
+                        elif is_enrolled(q):
+                            quest_lines.append(f"⏳ {q_name} `[{q_task}]` *(Đang chờ)*")
+                        else:
+                            quest_lines.append(f"⚪ {q_name} `[{q_task}]` *(Chưa nhận)*")
+
+                    embed_edit.add_field(
+                        name=f"📋 Danh Sách Nhiệm Vụ ({completed_count}/{total_count})",
+                        value="\n".join(quest_lines[:12]),
+                        inline=False
+                    )
+                else:
+                    embed_edit.add_field(name="📋 Danh Sách Nhiệm Vụ", value=status_text, inline=False)
+
+                embed_edit.set_footer(text=f"🔄 Tự động cập nhật • {datetime.now().strftime('%H:%M:%S')} • TXA Quest Bot v4.0")
                 await dm_msg.edit(embed=embed_edit, view=view)
             except Exception as e:
                 log(f"Không thể cập nhật DM cho user {user_id}: {e}", "warn")
@@ -369,6 +528,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
         # Initialize completer
         completer = QuestAutocompleter(api, user_id, status_callback=status_callback)
         view.completer = completer
+        view.status_callback = status_callback
         
         # Start in background task
         task = asyncio.create_task(completer.run())

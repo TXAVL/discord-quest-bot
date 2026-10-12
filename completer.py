@@ -37,6 +37,8 @@ class QuestAutocompleter:
         self.stop_event = asyncio.Event()
         self.current_quest_id = None
         self.failed_404_ids = set()
+        self.last_quests = []
+        self.current_quest_info = None
 
     async def stop(self):
         self.stop_event.set()
@@ -78,8 +80,10 @@ class QuestAutocompleter:
                         log(f"Enrollment blocked until: {blocked}", "warn")
                     if excluded:
                         log(f"{len(excluded)} quest(s) excluded", "debug")
+                    self.last_quests = quests
                     return quests
                 elif isinstance(data, list):
+                    self.last_quests = data
                     return data
                 return []
 
@@ -208,6 +212,8 @@ class QuestAutocompleter:
                             log(f"✅ Hoàn thành: {Colors.BOLD}{name}{Colors.RESET}", "ok")
                             return
                         seconds_done = min(seconds_needed, timestamp)
+                        if self.current_quest_info:
+                            self.current_quest_info["done"] = seconds_done
                         log(f"  [{name}] {seconds_done:.0f}/{seconds_needed}s", "progress")
                         if self.status_callback:
                             await self.status_callback(
@@ -274,6 +280,8 @@ class QuestAutocompleter:
                     progress_data = body.get("progress", {})
                     if progress_data and task_type in progress_data:
                         seconds_done = progress_data[task_type].get("value", seconds_done)
+                    if self.current_quest_info:
+                        self.current_quest_info["done"] = seconds_done
                     log(f"  [{name}] {seconds_done:.0f}/{seconds_needed}s", "progress")
 
                     remaining = max(0, seconds_needed - seconds_done)
@@ -349,6 +357,8 @@ class QuestAutocompleter:
                     progress_data = body.get("progress", {})
                     if progress_data and "PLAY_ACTIVITY" in progress_data:
                         seconds_done = progress_data["PLAY_ACTIVITY"].get("value", seconds_done)
+                    if self.current_quest_info:
+                        self.current_quest_info["done"] = seconds_done
                     log(f"  [{name}] {seconds_done:.0f}/{seconds_needed}s", "progress")
 
                     remaining = max(0, seconds_needed - seconds_done)
@@ -398,6 +408,13 @@ class QuestAutocompleter:
         log(f"━━━ Bắt đầu: {Colors.BOLD}{name}{Colors.RESET} (task: {task_type}) ━━━", "info")
 
         self.current_quest_id = qid
+        self.current_quest_info = {
+            "name": name,
+            "task_type": task_type,
+            "needed": get_seconds_needed(quest),
+            "done": get_seconds_done(quest),
+            "quest": quest
+        }
         try:
             if task_type in ("WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE"):
                 await self.complete_video(quest)
@@ -425,6 +442,7 @@ class QuestAutocompleter:
                 await self.status_callback(f"{config.EMOJI_FAIL} **Thất bại:** {name} (Lỗi: {str(e)})", update_panel=True)
         finally:
             self.current_quest_id = None
+            self.current_quest_info = None
 
     async def run(self):
         log("=" * 60, "info")
