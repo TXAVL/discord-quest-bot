@@ -1289,11 +1289,11 @@ async def user_info_command(interaction: discord.Interaction):
 # Command: View system stats (slash command)
 @bot.tree.command(name="system_stats", description="Xem thông số kỹ thuật máy chủ và trạng thái bot thời gian thực")
 async def system_stats(interaction: discord.Interaction):
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
     from system_info import build_system_embed, SystemStatsView
     embed = build_system_embed(bot, bot_start_time)
     view = SystemStatsView(bot, bot_start_time)
-    await interaction.followup.send(embed=embed, view=view)
+    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 # Command: Stop active session for calling user (slash command)

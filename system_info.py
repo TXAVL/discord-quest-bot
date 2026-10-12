@@ -5,7 +5,7 @@ import shutil
 import platform
 import subprocess
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Tuple
 
 try:
     import psutil
@@ -106,7 +106,6 @@ def get_cpu_info() -> Dict[str, Any]:
     if not cpu_model and sys.platform == "win32":
         try:
             cpu_model = platform.processor() or os.environ.get("PROCESSOR_IDENTIFIER", "")
-            # Làm gọn chuỗi tên CPU windows nếu quá dài
             if "Family" in cpu_model and "Intel" in cpu_model:
                 cpu_model = "Intel Core / Xeon Processor"
             elif "AMD" in cpu_model:
@@ -278,24 +277,62 @@ def get_process_memory() -> float:
     return 0.0
 
 
+def get_active_sessions_count() -> int:
+    """Đếm chính xác số phiên làm quest đang hoạt động trực tiếp trong bộ nhớ."""
+    import config
+    dead_uids = []
+    for uid, info in list(config.ACTIVE_USERS.items()):
+        task = info.get("task")
+        if task and task.done():
+            dead_uids.append(uid)
+    for uid in dead_uids:
+        config.ACTIVE_USERS.pop(uid, None)
+    return len(config.ACTIVE_USERS)
+
+
+def get_realtime_quest_stats() -> Tuple[int, int]:
+    """Lấy số lượng quest thành công & thất bại thời gian thực, đọc trực tiếp từ dữ liệu lưu trữ."""
+    import config
+    from limits_manager import load_limits
+    limits_data = load_limits()
+
+    file_completed = limits_data.get("total_completed", 0)
+    file_failed = limits_data.get("total_failed", 0)
+
+    # Đếm cộng dồn từ từng tài khoản để tuyệt đối chính xác
+    user_sum = 0
+    for k, v in limits_data.items():
+        if isinstance(v, dict) and "total_completed" in v:
+            user_sum += v.get("total_completed", 0)
+
+    total_completed = max(config.TOTAL_COMPLETED, file_completed, user_sum)
+    total_failed = max(config.TOTAL_FAILED, file_failed)
+
+    config.TOTAL_COMPLETED = total_completed
+    config.TOTAL_FAILED = total_failed
+    return total_completed, total_failed
+
+
 def build_system_embed(bot, bot_start_time: float) -> discord.Embed:
     """Tạo Embed thống kê hệ thống chuẩn giao diện hiện đại với Discord Dynamic Timestamp."""
     now = time.time()
     uptime_seconds = int(now - bot_start_time)
     start_ts = int(bot_start_time)
 
-    # Format text uptime
+    # Chi tiết thời gian chạy tính đến hiện tại
     days = uptime_seconds // 86400
     hours = (uptime_seconds % 86400) // 3600
     mins = (uptime_seconds % 3600) // 60
     secs = uptime_seconds % 60
     uptime_parts = []
     if days > 0:
-        uptime_parts.append(f"{days}d")
+        uptime_parts.append(f"{days} ngày")
     if hours > 0 or days > 0:
-        uptime_parts.append(f"{hours}h")
-    uptime_parts.append(f"{mins}m {secs}s")
-    uptime_str = " ".join(uptime_parts)
+        uptime_parts.append(f"{hours} giờ")
+    if mins > 0 or hours > 0 or days > 0:
+        uptime_parts.append(f"{mins} phút")
+    uptime_parts.append(f"{secs} giây")
+    exact_duration = " ".join(uptime_parts)
 
     os_desc = get_os_info()
     cpu = get_cpu_info()
@@ -303,16 +340,12 @@ def build_system_embed(bot, bot_start_time: float) -> discord.Embed:
     disk = get_disk_info()
     bot_ram_mb = get_process_memory()
 
-    # Latency
+    # Latency ping
     latency_ms = round(bot.latency * 1000) if hasattr(bot, "latency") and bot.latency is not None else 0
 
-    import config
-    active_sessions = len(config.ACTIVE_USERS)
-
-    from limits_manager import load_limits
-    limits_data = load_limits()
-    total_completed = limits_data.get("total_completed", config.TOTAL_COMPLETED)
-    total_failed = limits_data.get("total_failed", config.TOTAL_FAILED)
+    # Lấy thông số phiên và quest thời gian thực
+    active_sessions = get_active_sessions_count()
+    total_completed, total_failed = get_realtime_quest_stats()
 
     embed = discord.Embed(
         title="⚡ BẢNG ĐIỀU KHIỂN HỆ THỐNG & HIỆU NĂNG BOT",
@@ -327,11 +360,12 @@ def build_system_embed(bot, bot_start_time: float) -> discord.Embed:
     embed.add_field(
         name="🤖 Trạng Thái & Thời Gian Hoạt Động",
         value=(
-            f"• **Khởi động:** <t:{start_ts}:R> *(lúc <t:{start_ts}:F>)*\n"
-            f"• **Tổng thời gian chạy:** `{uptime_str}`\n"
-            f"• **Độ trễ Discord (Ping):** `⚡ {latency_ms} ms`\n"
-            f"• **Phiên hoạt động:** `👥 {active_sessions} tài khoản`\n"
-            f"• **Tổng Quest:** `✅ {total_completed}` thành công | `❌ {total_failed}` thất bại"
+            f"• ⏱️ **Uptime Real-time:** <t:{start_ts}:R>\n"
+            f"• 🕒 **Khởi động lúc:** <t:{start_ts}:F>\n"
+            f"• ⏳ **Tổng thời gian chạy:** `{exact_duration}`\n"
+            f"• 📶 **Độ trễ Discord (Ping):** `⚡ {latency_ms} ms`\n"
+            f"• 👥 **Phiên đang hoạt động:** `🟢 {active_sessions} tài khoản`\n"
+            f"• 🎯 **Tổng Quest:** `✅ {total_completed}` thành công | `❌ {total_failed}` thất bại"
         ),
         inline=False
     )
@@ -371,7 +405,7 @@ def build_system_embed(bot, bot_start_time: float) -> discord.Embed:
         inline=False
     )
 
-    embed.set_footer(text="Hỗ trợ đa nền tảng: Windows • VPS Linux • Termux Android | Nhấn nút bên dưới để cập nhật")
+    embed.set_footer(text=f"Cập nhật lúc {datetime.now().strftime('%H:%M:%S')} • Tin nhắn riêng tư chỉ bạn thấy")
     return embed
 
 
@@ -384,6 +418,5 @@ class SystemStatsView(discord.ui.View):
 
     @discord.ui.button(label="Làm Mới Số Liệu", style=discord.ButtonStyle.primary, emoji="🔄", custom_id="refresh_system_stats")
     async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
         embed = build_system_embed(self.bot, self.bot_start_time)
-        await interaction.edit_original_response(embed=embed, view=self)
+        await interaction.response.edit_message(embed=embed, view=self)
