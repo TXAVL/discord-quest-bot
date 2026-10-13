@@ -124,6 +124,7 @@ class DMProgressView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         if self.completer:
             await self.completer.stop()
+            config.ACTIVE_USERS.pop(self.user_id, None)
             if self.completer.status_callback:
                 await self.completer.status_callback("🛑 Đã dừng tiến trình.", finished=False)
             await interaction.followup.send("🛑 Đã dừng phiên làm quest của bạn.", ephemeral=True)
@@ -204,6 +205,102 @@ class DMProgressView(discord.ui.View):
                     pass
 
         return callback
+
+
+class AdminSessionControlView(discord.ui.View):
+    def __init__(self, target_user_id: int, completer=None, bot=None):
+        super().__init__(timeout=None)
+        self.target_user_id = target_user_id
+        self.completer = completer
+        self.bot = bot
+
+    @discord.ui.button(label="Dừng Phiên Này", style=discord.ButtonStyle.danger, emoji="🛑", custom_id=None)
+    async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in config.ADMIN_IDS:
+            await interaction.response.send_message("❌ Bạn không phải Admin.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        info = config.ACTIVE_USERS.pop(self.target_user_id, None)
+        if self.completer:
+            await self.completer.stop()
+        if info and info.get('task'):
+            info['task'].cancel()
+
+        button.disabled = True
+        button.label = "Đã Dừng Phiên"
+        try:
+            await interaction.message.edit(view=self)
+        except Exception:
+            pass
+
+        try:
+            user = self.bot.get_user(self.target_user_id) or await self.bot.fetch_user(self.target_user_id)
+            if user:
+                await user.send("🛑 **Tiến trình làm quest của bạn đã bị dừng bởi quản trị viên.**")
+        except Exception:
+            pass
+
+        if self.bot:
+            await self.bot.update_control_panel()
+
+        await interaction.followup.send(f"🛑 **Đã dừng phiên của người dùng <@{self.target_user_id}>!**", ephemeral=True)
+
+
+async def notify_admins_session_started(bot, user_id, discord_user, quest_username, quest_user_id, start_ts, completer=None):
+    """Gửi tin nhắn riêng (DM) tới các Admin khi có người dùng bắt đầu chạy phiên làm quest và trả về danh sách message để update realtime."""
+    if not config.ADMIN_IDS:
+        return []
+
+    from limits_manager import get_user_quota_info
+    quota = get_user_quota_info(user_id)
+    
+    embed = discord.Embed(
+        title=f"⚡ [LIVE MONITOR] Phiên Auto-Quest: {quest_username}",
+        color=discord.Color.from_rgb(88, 101, 242),
+        timestamp=discord.utils.utcnow()
+    )
+    if hasattr(discord_user, "display_avatar") and discord_user.display_avatar:
+        embed.set_author(name=f"Tài khoản: {quest_username} (Tag: {getattr(discord_user, 'name', 'Unknown')})", icon_url=discord_user.display_avatar.url)
+    else:
+        embed.set_author(name=f"Tài khoản: {quest_username}")
+
+    embed.add_field(
+        name="👤 Thông Tin Người Dùng",
+        value=(
+            f"• **Discord:** <@{user_id}> (`{getattr(discord_user, 'name', 'Unknown')}`, ID: `{user_id}`)\n"
+            f"• **Quest ID:** `{quest_user_id}`\n"
+            f"• **Hạn mức/Số dư:** `💎 {quota.get('quota_str', 'N/A')}`"
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="📊 Trạng Thái Phiên Chạy",
+        value=(
+            f"• **Trạng thái:** `🚀 Đang khởi động kết nối...`\n"
+            f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
+            f"• **Tiến độ tổng:** `▱▱▱▱▱▱▱▱▱▱` **0%**\n"
+            f"• **Phiên đồng thời:** `{len(config.ACTIVE_USERS)} phiên đang chạy`"
+        ),
+        inline=False
+    )
+    embed.set_footer(text="🔄 Live Admin Monitor • Tự động cập nhật real-time • TXA Quest Bot")
+
+    records = []
+    for admin_id in config.ADMIN_IDS:
+        try:
+            admin_user = bot.get_user(admin_id)
+            if not admin_user:
+                admin_user = await bot.fetch_user(admin_id)
+            if admin_user:
+                view = AdminSessionControlView(target_user_id=user_id, completer=completer, bot=bot)
+                msg = await admin_user.send(embed=embed, view=view)
+                records.append((msg, view))
+        except Exception as e:
+            log(f"Không thể gửi thông báo DM tới admin {admin_id}: {e}", "warn")
+
+    return records
+
 
 class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer"):
     token_input = discord.ui.TextInput(
@@ -311,10 +408,27 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
             )
             return
 
+        # Admin DM messages for real-time monitoring
+        admin_records = []
+
+        async def update_admin_monitors(embed_to_send, is_ended=False, ended_label="Phiên Đã Kết Thúc"):
+            if not admin_records:
+                return
+            for a_msg, a_view in list(admin_records):
+                try:
+                    if is_ended and a_view:
+                        for btn in a_view.children:
+                            if isinstance(btn, discord.ui.Button):
+                                btn.disabled = True
+                                btn.label = ended_label
+                    await a_msg.edit(embed=embed_to_send, view=a_view)
+                except Exception:
+                    pass
+
         # Define status callback to edit the DM message
         async def status_callback(status_text: str, finished: bool = False, update_panel: bool = False):
             try:
-                nonlocal dm_msg, view
+                nonlocal dm_msg, view, admin_records
                 
                 if update_panel:
                     await self.bot.update_control_panel()
@@ -323,6 +437,19 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                     from payment_views import get_limit_embed_and_view
                     embed_edit, view_edit = get_limit_embed_and_view(user_id)
                     await dm_msg.edit(embed=embed_edit, view=view_edit)
+
+                    # Cập nhật DM Admin thời gian thực khi đạt giới hạn
+                    limit_admin_embed = discord.Embed(
+                        title=f"⚠️ [ĐẠT GIỚI HẠN] Phiên của {user_info.get('username', username)}",
+                        color=discord.Color.orange(),
+                        description=(
+                            f"Người dùng <@{user_id}> đã đạt giới hạn quest hôm nay.\n"
+                            f"Tiến trình đang tạm dừng chờ người dùng thanh toán mua thêm lượt làm quest."
+                        ),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    limit_admin_embed.set_footer(text="🔄 Live Admin Monitor • TXA Quest Bot")
+                    await update_admin_monitors(limit_admin_embed)
                     return
                 
                 quests = []
@@ -341,9 +468,10 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                 if quests and all(is_completed(q) for q in quests):
                     finished = True
 
-                from limits_manager import get_user_total_completed
+                from limits_manager import get_user_total_completed, get_user_quota_info
                 from system_info import make_bar
                 user_total = get_user_total_completed(user_id)
+                quota_info = get_user_quota_info(user_id)
                 user_avatar_url = interaction.user.display_avatar.url
                 user_display_name = user_info.get('username', username)
                 
@@ -381,6 +509,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                             f"• **Trạng thái:** `🟢 Hoàn thành 100%`\n"
                             f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
                             f"• **Số quest hoàn tất:** `✅ {completed_count}/{total_count} nhiệm vụ`\n"
+                            f"• **Lượt quest khả dụng:** `💎 {quota_info['quota_str']}`\n"
                             f"• **Tổng quest tích lũy:** `🏆 {user_total} nhiệm vụ`"
                         ),
                         inline=False
@@ -400,7 +529,35 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                         )
 
                     embed_edit.set_footer(text=f"Hoàn tất lúc {datetime.now().strftime('%H:%M:%S')} • TXA Quest Bot v4.0")
-                    await dm_msg.edit(embed=embed_edit, view=view)
+                    try:
+                        await dm_msg.edit(embed=embed_edit, view=view)
+                    except discord.NotFound:
+                        dm_msg = await dm_channel.send(embed=embed_edit, view=view)
+
+                    # Cập nhật DM Admin thời gian thực khi hoàn tất 100%
+                    admin_finish_embed = discord.Embed(
+                        title=f"🎉 [HOÀN TẤT 100%] Phiên của {user_display_name}",
+                        color=discord.Color.green(),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    admin_finish_embed.set_author(name=f"Tài khoản: {user_display_name} (Tag: {getattr(interaction.user, 'name', 'Unknown')})", icon_url=user_avatar_url)
+                    admin_finish_embed.add_field(
+                        name="👤 Thông Tin Người Dùng",
+                        value=f"• Tag: <@{user_id}>\n• Username: **{getattr(interaction.user, 'name', 'Unknown')}**\n• ID: `{user_id}`",
+                        inline=False
+                    )
+                    admin_finish_embed.add_field(
+                        name="📊 Kết Quả Phiên Chạy",
+                        value=(
+                            f"• **Trạng thái:** `🟢 Hoàn thành 100%`\n"
+                            f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
+                            f"• **Số quest hoàn tất:** `✅ {completed_count}/{total_count} nhiệm vụ`\n"
+                            f"• **Tổng quest tích lũy:** `🏆 {user_total} nhiệm vụ`"
+                        ),
+                        inline=False
+                    )
+                    admin_finish_embed.set_footer(text=f"🔄 Live Admin Monitor • Hoàn tất lúc {datetime.now().strftime('%H:%M:%S')} • TXA Quest Bot")
+                    await update_admin_monitors(admin_finish_embed, is_ended=True, ended_label="Đã Hoàn Thành 100%")
 
                     # Gửi tin nhắn thông báo riêng báo đã xong và tự xóa sau 1 phút
                     if completer and not getattr(completer, '_completion_notice_sent', False):
@@ -446,6 +603,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                         f"• **Trạng thái:** `{status_badge}`\n"
                         f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
                         f"• **Tiến độ phiên:** `{overall_bar}` **{overall_ratio:.0f}%** ({completed_count}/{total_count} xong)\n"
+                        f"• **Lượt quest khả dụng:** `💎 {quota_info['quota_str']}`\n"
                         f"• **Tổng quest tích lũy:** `🏆 {user_total} nhiệm vụ`"
                     ),
                     inline=False
@@ -522,7 +680,63 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                     embed_edit.add_field(name="📋 Danh Sách Nhiệm Vụ", value=status_text, inline=False)
 
                 embed_edit.set_footer(text=f"🔄 Tự động cập nhật • {datetime.now().strftime('%H:%M:%S')} • TXA Quest Bot v4.0")
-                await dm_msg.edit(embed=embed_edit, view=view)
+                try:
+                    await dm_msg.edit(embed=embed_edit, view=view)
+                except discord.NotFound:
+                    dm_msg = await dm_channel.send(embed=embed_edit, view=view)
+
+                # Cập nhật Real-time cho tin nhắn riêng (DM) của Admin
+                is_stopped = bool(completer and completer.stop_event.is_set())
+                admin_status_title = f"🛑 [ĐÃ DỪNG] Phiên của {user_display_name}" if is_stopped else f"⚡ [LIVE MONITOR] Phiên Auto-Quest: {user_display_name}"
+                admin_status_color = discord.Color.red() if is_stopped else color
+
+                admin_embed = discord.Embed(
+                    title=admin_status_title,
+                    color=admin_status_color,
+                    timestamp=discord.utils.utcnow()
+                )
+                admin_embed.set_author(name=f"Tài khoản: {user_display_name} (Tag: {getattr(interaction.user, 'name', 'Unknown')})", icon_url=user_avatar_url)
+                admin_embed.add_field(
+                    name="👤 Thông Tin Người Dùng",
+                    value=(
+                        f"• **Discord:** <@{user_id}> (`{getattr(interaction.user, 'name', 'Unknown')}`, ID: `{user_id}`)\n"
+                        f"• **Quest ID:** `{user_info.get('id', 'N/A')}`\n"
+                        f"• **Hạn mức/Số dư:** `💎 {quota_info['quota_str']}`"
+                    ),
+                    inline=False
+                )
+                admin_embed.add_field(
+                    name="📊 Tiến Độ Thời Gian Thực",
+                    value=(
+                        f"• **Trạng thái:** `{status_badge}`\n"
+                        f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
+                        f"• **Tiến độ tổng:** `{overall_bar}` **{overall_ratio:.0f}%** ({completed_count}/{total_count} xong)\n"
+                        f"• **Phiên đồng thời:** `{len(config.ACTIVE_USERS)} phiên đang chạy`"
+                    ),
+                    inline=False
+                )
+
+                if active_q:
+                    admin_embed.add_field(
+                        name="⚡ Nhiệm Vụ Đang Xử Lý",
+                        value=(
+                            f"• **Nhiệm vụ:** **{active_name}**\n"
+                            f"• **Loại:** `{task_label}`\n"
+                            f"• **Tiến độ:** `{quest_bar}` **{pct:.0f}%** (`{done:.0f}s / {needed}s`)\n"
+                            f"• **Thời gian còn lại:** `⏳ ~{eta_text}`"
+                        ),
+                        inline=False
+                    )
+
+                if quests:
+                    admin_embed.add_field(
+                        name=f"📋 Danh Sách Nhiệm Vụ ({completed_count}/{total_count})",
+                        value="\n".join(quest_lines[:8]),
+                        inline=False
+                    )
+
+                admin_embed.set_footer(text=f"🔄 Live Admin Monitor • {datetime.now().strftime('%H:%M:%S')} • TXA Quest Bot v4.0")
+                await update_admin_monitors(admin_embed, is_ended=is_stopped, ended_label="Đã Dừng Phiên")
             except Exception as e:
                 log(f"Không thể cập nhật DM cho user {user_id}: {e}", "warn")
 
@@ -530,16 +744,40 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
         completer = QuestAutocompleter(api, user_id, status_callback=status_callback)
         view.completer = completer
         view.status_callback = status_callback
-        
+
+        # Gửi DM thông báo khởi chạy tới Admin và lưu danh sách message để update realtime
+        admin_records = await notify_admins_session_started(
+            bot=self.bot,
+            user_id=user_id,
+            discord_user=interaction.user,
+            quest_username=user_info.get('username', username),
+            quest_user_id=user_info.get('id', 'N/A'),
+            start_ts=start_ts,
+            completer=completer
+        )
+
+        # Define worker that guarantees ACTIVE_USERS cleanup and panel update
+        async def session_worker():
+            try:
+                await completer.run()
+            finally:
+                config.ACTIVE_USERS.pop(user_id, None)
+                try:
+                    await self.bot.update_control_panel()
+                except Exception:
+                    pass
+
         # Start in background task
-        task = asyncio.create_task(completer.run())
+        task = asyncio.create_task(session_worker())
         
         # Store metadata
         config.ACTIVE_USERS[user_id] = {
             'completer': completer,
             'task': task,
             'username': user_info.get('username', username),
-            'start_timestamp': start_ts
+            'start_timestamp': start_ts,
+            'discord_user': interaction.user,
+            'admin_records': admin_records
         }
 
         # Ephemeral notification
@@ -574,6 +812,22 @@ class ControlView(discord.ui.View):
         
         modal = TokenModal(self.bot)
         await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Số Dư Quest", style=discord.ButtonStyle.primary, emoji="💎", custom_id="btn_quota")
+    async def quota_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        allowed_channels = set()
+        if config.CHANNEL_ID:
+            allowed_channels.add(config.CHANNEL_ID)
+        if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
+            allowed_channels.update(config.SERVER_CHANNELS.values())
+
+        if allowed_channels and interaction.channel_id not in allowed_channels:
+            await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
+            return
+
+        from payment_views import get_limit_embed_and_view
+        embed, view = get_limit_embed_and_view(interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @discord.ui.button(label="Hướng Dẫn", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="btn_guide")
     async def guide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1038,7 +1292,7 @@ async def view_config(interaction: discord.Interaction):
 
 # Command: Admin set quickly quest limits/balance (slash command for Admin)
 @bot.tree.command(name="set_limit", description="[Admin] Đặt số lượt làm quest (số dư) cho người dùng")
-@app_commands.describe(user_discord_id="ID Discord của người dùng muốn đặt giới hạn", balance="Số lượt quest muốn đặt (ví dụ: 5)")
+@app_commands.describe(user_discord_id="Chọn hoặc nhập ID Discord của người dùng", balance="Số lượt quest muốn đặt (ví dụ: 5)")
 async def set_limit_command(interaction: discord.Interaction, user_discord_id: str, balance: int):
     if interaction.user.id not in config.ADMIN_IDS:
         await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin mới có quyền.", ephemeral=True)
@@ -1077,6 +1331,40 @@ async def set_limit_command(interaction: discord.Interaction, user_discord_id: s
     embed.set_footer(text="Hệ thống quản lý giới hạn Quest Bot")
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@set_limit_command.autocomplete("user_discord_id")
+async def set_limit_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    if interaction.user.id not in config.ADMIN_IDS:
+        return []
+
+    from limits_manager import load_limits
+    limits = load_limits()
+    choices = []
+    current_lower = current.strip().lower()
+    
+    seen = set()
+    for uid, info in config.ACTIVE_USERS.items():
+        seen.add(str(uid))
+        uname = info.get("username", "Đang chạy")
+        label = f"[Đang chạy] {uname} ({uid})"
+        if not current_lower or current_lower in label.lower() or current_lower in str(uid):
+            choices.append(app_commands.Choice(name=label[:100], value=str(uid)))
+
+    for uid, udata in limits.items():
+        if uid in seen or not str(uid).isdigit():
+            continue
+        balance = udata.get("purchased_balance", 0) if isinstance(udata, dict) else 0
+        label = f"ID: {uid} (Số dư: {balance} lượt)"
+        if not current_lower or current_lower in label.lower() or current_lower in str(uid):
+            choices.append(app_commands.Choice(name=label[:100], value=str(uid)))
+            if len(choices) >= 25:
+                break
+
+    return choices[:25]
 
 
 # Command: Admin clear pycache and compile files (slash command for Admin)
@@ -1135,7 +1423,7 @@ async def clear_cache_command(interaction: discord.Interaction):
 
 # Command: Force stop a user (slash command)
 @bot.tree.command(name="stop_user", description="[Admin] Dừng tiến trình tự động làm quest của một người dùng")
-@app_commands.describe(user_discord_id="ID Discord của người dùng muốn dừng (ví dụ: 123456789)")
+@app_commands.describe(user_discord_id="Chọn người dùng đang có phiên chạy cần dừng")
 async def stop_user(interaction: discord.Interaction, user_discord_id: str):
     if interaction.user.id not in config.ADMIN_IDS:
         await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!**", ephemeral=True)
@@ -1147,7 +1435,7 @@ async def stop_user(interaction: discord.Interaction, user_discord_id: str):
 
     uid = int(user_discord_id)
     if uid not in config.ACTIVE_USERS:
-        await interaction.response.send_message("❌ Người dùng này hiện không hoạt động.", ephemeral=True)
+        await interaction.response.send_message("❌ Người dùng này hiện không hoạt động hoặc phiên đã kết thúc trước đó.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -1168,7 +1456,35 @@ async def stop_user(interaction: discord.Interaction, user_discord_id: str):
         log(f"Lỗi dừng user: {e}", "warn")
 
     await bot.update_control_panel()
-    await interaction.followup.send(f"✅ **Đã dừng tiến trình hoạt động của:** {info['username']}", ephemeral=True)
+    await interaction.followup.send(f"✅ **Đã dừng tiến trình hoạt động của:** **{info['username']}** (ID: `{uid}`)", ephemeral=True)
+
+
+@stop_user.autocomplete("user_discord_id")
+async def stop_user_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    if interaction.user.id not in config.ADMIN_IDS:
+        return []
+
+    choices = []
+    current_lower = current.strip().lower()
+    for uid, info in config.ACTIVE_USERS.items():
+        uname = info.get("username", "Unknown")
+        d_user = info.get("discord_user")
+        d_name = d_user.name if d_user else ""
+        
+        # Format label showing clearly the username and Discord ID
+        display_label = f"{uname}"
+        if d_name and d_name != uname:
+            display_label += f" ({d_name})"
+        display_label += f" - ID: {uid}"
+        
+        if not current_lower or current_lower in display_label.lower() or current_lower in str(uid):
+            choices.append(app_commands.Choice(name=display_label[:100], value=str(uid)))
+            if len(choices) >= 25:
+                break
+    return choices
 
 
 class QuestClaimView(discord.ui.View):
@@ -1557,6 +1873,22 @@ async def set_timeout(interaction: discord.Interaction, minutes: int):
         f"Mã QR hóa đơn sẽ hết hạn sau: **{minutes} phút** ({seconds} giây).",
         ephemeral=True
     )
+
+
+# Command: Check quest quota balance (slash command)
+@bot.tree.command(name="quota", description="Kiểm tra số dư lượt làm quest và hạn mức tài khoản của bạn")
+async def check_quota(interaction: discord.Interaction):
+    from payment_views import get_limit_embed_and_view
+    embed, view = get_limit_embed_and_view(interaction.user.id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+# Command: Buy quest turns (slash command)
+@bot.tree.command(name="buy", description="Mua thêm lượt làm quest tự động (Tạo mã VietQR)")
+async def buy_quests(interaction: discord.Interaction):
+    from payment_views import get_limit_embed_and_view
+    embed, view = get_limit_embed_and_view(interaction.user.id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 def run_bot():

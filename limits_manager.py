@@ -216,6 +216,45 @@ def add_purchased_balance(user_id: int, quantity: int):
     save_limits(limits)
     log(f"Cộng thêm {quantity} lượt cho {user_id}. Số dư hiện tại: {user_data['purchased_balance']}", "ok")
 
+def get_user_quota_info(user_id: int) -> dict:
+    """Lấy thông tin chi tiết về số dư lượt làm quest của người dùng."""
+    is_admin = user_id in config.ADMIN_IDS
+    uid = str(user_id)
+    limits = load_limits()
+    user_data = limits.get(uid, {}) if isinstance(limits.get(uid), dict) else {}
+    
+    purchased = user_data.get("purchased_balance", 0)
+    today_str = date.today().isoformat()
+    free_date = user_data.get("free_completed_date")
+    free_count = user_data.get("free_completed_count", 0)
+    
+    # 1 lượt miễn phí hàng ngày (reset qua ngày mới)
+    free_available = 1 if (free_date != today_str or free_count < 1) else 0
+    total_completed = user_data.get("total_completed", 0)
+    
+    if is_admin:
+        quota_str = "👑 Vô hạn (Admin)"
+        if purchased > 0:
+            quota_str += f" • {purchased} lượt mua dự trữ"
+    else:
+        if purchased > 0:
+            quota_str = f"{purchased} lượt mua"
+            if free_available > 0:
+                quota_str += " + 1 lượt free hôm nay"
+        elif free_available > 0:
+            quota_str = "1 lượt free hôm nay"
+        else:
+            quota_str = "0 lượt (Hết lượt free hôm nay)"
+
+    return {
+        "is_admin": is_admin,
+        "purchased_balance": purchased,
+        "free_available": free_available,
+        "free_completed_count": free_count if free_date == today_str else 0,
+        "total_completed": total_completed,
+        "quota_str": quota_str
+    }
+
 async def verify_payment_on_sepay(order_id: str, expected_amount: float) -> bool:
     """Gọi SePay API để xác nhận xem người dùng đã thanh toán đơn hàng này chưa."""
     api_key = config.SEPAY_API_KEY
@@ -223,36 +262,41 @@ async def verify_payment_on_sepay(order_id: str, expected_amount: float) -> bool
         log("SEPAY_API_KEY chưa được cấu hình, không thể xác thực thanh toán", "error")
         return False
 
-    url = "https://userapi.sepay.vn/v2/transactions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
 
+    endpoints = [
+        "https://userapi.sepay.vn/v2/transactions?limit=50",
+        "https://my.sepay.vn/userapi/transactions/list?limit=50"
+    ]
+
     log(f"Đang kết nối SePay API để đối soát đơn hàng: {order_id} (Số tiền mong đợi: {expected_amount:,} VNĐ)...", "info")
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=10) as r:
-                log(f"Kết quả gọi SePay API - Status: {r.status}", "info")
-                if r.status == 200:
-                    data = await r.json()
-                    # Log full API response in debug mode
-                    log(f"Chi tiết JSON phản hồi từ SePay:\n{json.dumps(data, indent=2, ensure_ascii=False)}", "debug")
-                    
-                    transactions = data.get("data", [])
-                    for tx in transactions:
-                        content = tx.get("transaction_content", "")
-                        amount = float(tx.get("amount_in", 0))
-                        
-                        # Match order_id (case-insensitive) and check amount
-                        if order_id.lower() in content.lower() and amount >= expected_amount:
-                            log(f"Xác thực thanh toán thành công cho đơn hàng: {order_id} - Số tiền nhận: {amount} VNĐ", "ok")
-                            return True
-                else:
-                    body = await r.text()
-                    log(f"Lỗi API SePay (Status: {r.status}): {body}", "error")
-    except Exception as e:
-        log(f"Ngoại lệ khi kiểm tra thanh toán SePay: {e}", "error")
+    
+    for url in endpoints:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=10) as r:
+                    log(f"Kết quả gọi SePay ({url.split('?')[0]}) - Status: {r.status}", "info")
+                    if r.status == 200:
+                        data = await r.json()
+                        tx_list = data.get("data") if isinstance(data.get("data"), list) else data.get("transactions", [])
+                        for tx in tx_list:
+                            content = tx.get("transaction_content", "") or ""
+                            amount_val = tx.get("amount_in", 0)
+                            try:
+                                amount = float(amount_val)
+                            except (ValueError, TypeError):
+                                amount = 0.0
+                            
+                            # Match order_id (case-insensitive) and verify expected amount
+                            if order_id.lower() in content.lower() and amount >= expected_amount:
+                                log(f"Xác thực thanh toán thành công cho đơn hàng: {order_id} - Số tiền nhận: {amount:,.0f} VNĐ", "ok")
+                                return True
+        except Exception as e:
+            log(f"Lỗi khi kiểm tra SePay endpoint {url}: {e}", "warn")
+            continue
 
     log(f"Đối soát giao dịch {order_id} thất bại (chưa tìm thấy chuyển khoản khớp)", "warn")
     return False
