@@ -1,3 +1,4 @@
+import json
 import time
 import random
 import traceback
@@ -61,6 +62,22 @@ class QuestAutocompleter:
             else:
                 body = await r.text()
                 log(f"Lỗi claim reward: status {r.status}, response: {body[:200]}", "error")
+                try:
+                    err_json = json.loads(body)
+                    if "captcha_key" in err_json or "captcha-required" in body or "captcha_service" in err_json:
+                        return {
+                            "error": "captcha_required",
+                            "captcha": True,
+                            "captcha_data": err_json,
+                            "details": body
+                        }
+                except Exception:
+                    if "captcha-required" in body:
+                        return {
+                            "error": "captcha_required",
+                            "captcha": True,
+                            "details": body
+                        }
                 return {"error": f"Discord API returned status {r.status}", "details": body}
         except Exception as e:
             log(f"Ngoại lệ claim reward: {e}", "error")
@@ -456,14 +473,10 @@ class QuestAutocompleter:
         # Kiểm tra giới hạn của người dùng trước khi bắt đầu phiên chạy
         from limits_manager import is_user_limited, consume_limit
         if is_user_limited(self.user_id):
-            log(f"Người dùng {self.user_id} đã đạt giới hạn. Tạm dừng tiến trình...", "warn")
+            log(f"Người dùng {self.user_id} đã đạt giới hạn. Dừng phiên chạy...", "warn")
             if self.status_callback:
-                await self.status_callback("LIMIT_REACHED")
-            while is_user_limited(self.user_id):
-                if self.stop_event.is_set():
-                    return
-                await asyncio.sleep(5)
-            log(f"Người dùng {self.user_id} đã được mở giới hạn, tiếp tục hoạt động.", "ok")
+                await self.status_callback("LIMIT_REACHED", finished=True)
+            return
 
         # Tiêu thụ 1 lượt sử dụng cho cả phiên chạy này
         consume_limit(self.user_id)
@@ -477,9 +490,10 @@ class QuestAutocompleter:
             total = len(quests)
 
             if not quests:
-                log("Không có quest nào", "info")
+                log("Không có quest nào trong tài khoản", "info")
                 if self.status_callback:
-                    await self.status_callback("📭 **Không tìm thấy Quest nào trong tài khoản của bạn.**")
+                    await self.status_callback("📭 **Không tìm thấy Quest nào trong tài khoản của bạn.**", finished=True)
+                break
             else:
                 enrolled_count = sum(1 for q in quests if is_enrolled(q))
                 completed_count = sum(1 for q in quests if is_completed(q))
@@ -507,24 +521,33 @@ class QuestAutocompleter:
                         await self.process_quest(q)
                 else:
                     log("Không có quest nào cần hoàn thành lúc này", "info")
-                    if self.status_callback:
-                        quest_list_str = []
-                        for q in quests:
-                            name = get_quest_name(q)
-                            task = get_task_type(q) or "?"
-                            if is_completed(q):
-                                status_emoji = config.EMOJI_SUCCESS
-                            elif is_enrolled(q):
-                                status_emoji = config.EMOJI_LOADING
-                            else:
-                                status_emoji = "⚪"
-                            quest_list_str.append(f"{status_emoji} **{name}** [{task}]")
+                    if quests and all(is_completed(q) for q in quests):
+                        log("🎉 Tất cả các nhiệm vụ đã hoàn thành 100%! Kết thúc phiên.", "ok")
+                        if self.status_callback:
+                            await self.status_callback("FINISHED", finished=True)
+                        break
+                    else:
+                        if self.status_callback:
+                            quest_list_str = []
+                            for q in quests:
+                                name = get_quest_name(q)
+                                task = get_task_type(q) or "?"
+                                if is_completed(q):
+                                    status_emoji = config.EMOJI_SUCCESS
+                                elif is_enrolled(q):
+                                    status_emoji = config.EMOJI_LOADING
+                                else:
+                                    status_emoji = "⚪"
+                                quest_list_str.append(f"{status_emoji} **{name}** [{task}]")
 
-                        await self.status_callback(
-                            "💤 **Hiện không có nhiệm vụ mới nào cần thực hiện.**\n"
-                            "**Danh sách nhiệm vụ của bạn:**\n" + "\n".join(quest_list_str[:10])
-                        )
+                            await self.status_callback(
+                                "💤 **Hiện không có nhiệm vụ mới nào cần thực hiện.**\n"
+                                "**Danh sách nhiệm vụ của bạn:**\n" + "\n".join(quest_list_str[:10]),
+                                finished=True
+                            )
+                        break
 
+            # Nếu còn nhiệm vụ chưa hoàn tất, đợi và quét tiếp
             log(f"\nChờ {POLL_INTERVAL}s...\n", "info")
             for _ in range(POLL_INTERVAL):
                 if self.stop_event.is_set():

@@ -33,8 +33,8 @@ def save_limits(limits: dict):
 
 def is_user_limited(user_id: int) -> bool:
     """Kiểm tra xem người dùng có bị giới hạn quest hay không."""
-    if user_id in config.ADMIN_IDS:
-        return False  # Admins bypass limit!
+    if getattr(config, "ADMIN_BYPASS_LIMIT", True) and user_id in config.ADMIN_IDS:
+        return False  # Admins bypass limit when enabled
 
     uid = str(user_id)
     limits = load_limits()
@@ -57,8 +57,8 @@ def is_user_limited(user_id: int) -> bool:
 
 def consume_limit(user_id: int) -> bool:
     """Tiêu thụ 1 lượt làm quest của người dùng (lượt free hoặc lượt mua)."""
-    if user_id in config.ADMIN_IDS:
-        return True  # Admins don't consume limit
+    if getattr(config, "ADMIN_BYPASS_LIMIT", True) and user_id in config.ADMIN_IDS:
+        return True  # Admins don't consume limit when bypass enabled
 
     uid = str(user_id)
     limits = load_limits()
@@ -232,7 +232,7 @@ def get_user_quota_info(user_id: int) -> dict:
     free_available = 1 if (free_date != today_str or free_count < 1) else 0
     total_completed = user_data.get("total_completed", 0)
     
-    if is_admin:
+    if is_admin and getattr(config, 'ADMIN_BYPASS_LIMIT', True):
         quota_str = "👑 Vô hạn (Admin)"
         if purchased > 0:
             quota_str += f" • {purchased} lượt mua dự trữ"

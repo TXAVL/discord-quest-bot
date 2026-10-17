@@ -22,6 +22,7 @@ DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
+ADMIN_BYPASS_LIMIT = os.getenv("ADMIN_BYPASS_LIMIT", "True").lower() in ("true", "1", "yes")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID")) if os.getenv("CHANNEL_ID", "").strip().isdigit() else None
 
 # Global statistics & tracking
@@ -59,3 +60,60 @@ SUPPORTED_TASKS = [
     "PLAY_ACTIVITY",
     "WATCH_VIDEO_ON_MOBILE",
 ]
+
+
+def update_env_variable(key: str, value: str):
+    """Cập nhật biến môi trường trong RAM và lưu vĩnh viễn vào file .env"""
+    key = key.strip()
+    value = value.strip()
+    
+    # 1. Cập nhật RAM os.environ
+    os.environ[key] = value
+
+    # 2. Cập nhật các biến module tương ứng trong config
+    if key == "ADMIN_BYPASS_LIMIT":
+        global ADMIN_BYPASS_LIMIT
+        ADMIN_BYPASS_LIMIT = value.lower() in ("true", "1", "yes")
+    elif key == "POLL_INTERVAL" and value.isdigit():
+        global POLL_INTERVAL
+        POLL_INTERVAL = int(value)
+    elif key == "HEARTBEAT_INTERVAL" and value.isdigit():
+        global HEARTBEAT_INTERVAL
+        HEARTBEAT_INTERVAL = int(value)
+    elif key == "AUTO_ACCEPT":
+        global AUTO_ACCEPT
+        AUTO_ACCEPT = value.lower() in ("true", "1", "yes")
+    elif key == "LOG_PROGRESS":
+        global LOG_PROGRESS
+        LOG_PROGRESS = value.lower() in ("true", "1", "yes")
+    elif key == "DEBUG":
+        global DEBUG
+        DEBUG = value.lower() in ("true", "1", "yes")
+
+    # 3. Cập nhật file .env
+    env_path = ".env"
+    lines = []
+    found = False
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            k, _ = stripped.split("=", 1)
+            if k.strip() == key:
+                new_lines.append(f"{key}={value}\n")
+                found = True
+                continue
+        new_lines.append(line)
+
+    if not found:
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines[-1] += "\n"
+        new_lines.append(f"{key}={value}\n")
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
