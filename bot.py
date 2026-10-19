@@ -1285,43 +1285,68 @@ class QuestBot(commands.Bot):
         except Exception:
             pass
 
-    async def on_guild_join(self, guild: discord.Guild):
-        """Tự động xử lý khi Bot được mời vào một Server mới."""
-        log(f"🎉 Bot vừa được thêm vào máy chủ mới: {guild.name} (ID: {guild.id})", "ok")
-        
-        # 1. Tự động sync slash commands sang Server mới ngay lập tức
-        try:
-            log(f"Slash commands toàn cục sẽ tự áp dụng cho guild mới: {guild.name}", "ok")
-        except Exception as e:
-            log(f"Lỗi sync slash commands tới guild mới: {e}", "warn")
+    def pick_panel_channel(self, guild: discord.Guild):
+        """Chọn kênh phù hợp nhất để đặt Bảng điều khiển: bot phải đủ quyền, ưu tiên kênh tên quest/bot,
+        kênh công khai (mọi người thấy và chat được) và kênh hệ thống."""
+        me = guild.me
+        keywords = ("quest", "auto", "bot", "nitro", "free", "lệnh", "lenh", "command")
+        best, best_score = None, -1
+        for ch in guild.text_channels:
+            ok, _ = check_bot_channel_permissions(ch, me)
+            if not ok:
+                continue
+            everyone = ch.permissions_for(guild.default_role)
+            score = 0
+            name = ch.name.lower()
+            if any(k in name for k in keywords):
+                score += 5
+            if everyone.view_channel:
+                score += 3
+            if everyone.send_messages:
+                score += 2
+            if guild.system_channel and ch.id == guild.system_channel.id:
+                score += 1
+            if score > best_score:
+                best, best_score = ch, score
+        return best
 
-        # 2. Tìm kênh văn bản thích hợp nhất để tạo Bảng điều khiển
-        target_channel = guild.system_channel
-        if not target_channel or not hasattr(target_channel, "permissions_for") or not target_channel.permissions_for(guild.me).send_messages:
-            for ch in guild.text_channels:
-                if ch.permissions_for(guild.me).send_messages and ch.permissions_for(guild.me).view_channel:
-                    target_channel = ch
-                    break
+    async def on_guild_join(self, guild: discord.Guild):
+        """Bot vào server mới: tự tìm kênh phù hợp nhất rồi tạo Bảng điều khiển, người mời không cần cài đặt gì."""
+        log(f"🎉 Bot vừa được thêm vào máy chủ mới: {guild.name} (ID: {guild.id})", "ok")
+        # Slash commands toàn cục tự áp dụng cho server mới, không cần sync riêng.
+        target_channel = self.pick_panel_channel(guild)
 
         if target_channel:
-            # Lưu kênh làm kênh hoạt động chính của Server
             save_channel_config(target_channel.id, guild_id=guild.id)
-            
-            # Gửi tin nhắn chào mừng và Bảng điều khiển
             try:
                 welcome_embed = discord.Embed(
                     title="🎉 Cảm ơn bạn đã thêm Quest Bot!",
                     description=(
                         f"Bot đã sẵn sàng hoạt động tại máy chủ **{guild.name}**!\n\n"
-                        f"📍 **Kênh hoạt động tự động:** {target_channel.mention}\n"
-                        f"⚙️ **Admin có thể đổi kênh hoạt động bất cứ lúc nào bằng lệnh:** `/setup_here` hoặc `/channel`"
+                        f"📍 **Bảng điều khiển đã được tạo tự động tại:** {target_channel.mention}\n"
+                        f"🚀 Mọi người chỉ cần bấm **Bắt Đầu** trên bảng điều khiển, hoặc gõ `/help` để xem các lệnh."
                     ),
                     color=discord.Color.green()
                 )
                 await target_channel.send(embed=welcome_embed)
                 await self.update_control_panel(target_channel=target_channel)
+                log(f"Đã tự tạo Bảng điều khiển tại #{target_channel.name} ({guild.name})", "ok")
             except Exception as e:
                 log(f"Không thể gửi tin nhắn chào mừng tại guild {guild.id}: {e}", "warn")
+            return
+
+        # Không kênh nào đủ quyền -> nhắn riêng cho chủ server hướng dẫn cấp quyền
+        log(f"Không tìm được kênh phù hợp ở {guild.name}: bot thiếu quyền ở mọi kênh", "warn")
+        try:
+            owner = guild.owner or await self.fetch_user(guild.owner_id)
+            if owner:
+                await owner.send(
+                    f"⚠️ **Quest Bot đã vào server `{guild.name}` nhưng không có đủ quyền ở bất kỳ kênh nào để tạo Bảng điều khiển.**\n"
+                    f"Hãy cấp cho bot các quyền: **Xem kênh, Gửi tin nhắn, Nhúng liên kết, Đọc lịch sử tin nhắn** "
+                    f"ở ít nhất một kênh, rồi mời lại bot bằng link đúng quyền:\n{get_bot_invite_url(self)}"
+                )
+        except Exception as e:
+            log(f"Không thể nhắn chủ server {guild.id}: {e}", "warn")
 
     async def update_control_panel(self, target_channel=None):
         """Creates or updates the main statistics control panel embed across configured server channels."""

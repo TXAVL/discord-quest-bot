@@ -1018,11 +1018,11 @@ def invite_view(user_id: int) -> TxaView:
         "### ➕ Thêm Quest Bot Vào Server Của Bạn",
         "Nhấn nút **Mời Bot** bên dưới để đưa bot vào máy chủ Discord của bạn.",
         "---",
-        "**✨ Khi bot tham gia server mới**\n"
-        "• Bot tự tìm kênh phù hợp và tạo **Bảng điều khiển**.\n"
-        "• Admin dùng `/setup_here` ở bất kỳ kênh nào để đổi kênh hoạt động.\n"
-        "• Mọi người có thể dùng `/help` để xem toàn bộ lệnh.",
-        "-# Bot chỉ xin quyền cần thiết để gửi tin nhắn và tạo bảng điều khiển.",
+        "**✨ Bạn không cần cài đặt gì thêm**\n"
+        "• Ngay khi vào server, bot **tự động tìm kênh phù hợp nhất** (ưu tiên kênh tên có `quest`, `bot`, `auto`…) và tạo **Bảng điều khiển** ở đó.\n"
+        "• Mọi người chỉ cần bấm 🚀 **Bắt Đầu** trên bảng điều khiển, hoặc gõ `/help` để xem toàn bộ lệnh.\n"
+        "• Nếu không thấy bảng điều khiển, hãy kiểm tra bot có quyền **Xem kênh, Gửi tin nhắn, Nhúng liên kết, Đọc lịch sử** — bot sẽ nhắn riêng cho chủ server nếu thiếu quyền.",
+        "-# Bot chỉ xin các quyền cần thiết để gửi tin nhắn và tạo bảng điều khiển.",
         accent=ACCENT,
     ))
     btns = link_buttons("invite", "quest", "discord")
