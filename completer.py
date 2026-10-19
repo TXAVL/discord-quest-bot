@@ -447,6 +447,11 @@ class QuestAutocompleter:
                 import config
                 config.TOTAL_COMPLETED += 1
                 save_global_stats()
+                try:
+                    from limits_manager import increment_guild_completed
+                    increment_guild_completed((config.ACTIVE_USERS.get(self.user_id) or {}).get("guild_id"))
+                except Exception:
+                    pass
                 if self.status_callback:
                     await self.status_callback(f"{config.EMOJI_SUCCESS} **Hoàn thành:** {name} 🎉", update_panel=True)
         except Exception as e:

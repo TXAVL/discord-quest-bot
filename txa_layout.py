@@ -402,7 +402,12 @@ class ConfigLayoutView(TxaView):
     def _summary(self) -> str:
         on = lambda v: "Bật ✅" if v else "Tắt ❌"
         timeout = get_transaction_timeout()
-        channel = f"<#{config.CHANNEL_ID}>" if config.CHANNEL_ID else "Chưa cấu hình"
+        mapped = getattr(config, "SERVER_CHANNELS", None) or {}
+        if mapped:
+            shown = " ".join(f"<#{c}>" for c in list(mapped.values())[:4])
+            channel = f"{len(mapped)} server — {shown}" + (" …" if len(mapped) > 4 else "")
+        else:
+            channel = f"<#{config.CHANNEL_ID}>" if config.CHANNEL_ID else "Chưa cấu hình"
         return (
             f"📺 Kênh hoạt động: {channel}\n"
             f"👑 Admin IDs: `{', '.join(map(str, config.ADMIN_IDS))}`\n"
@@ -551,8 +556,10 @@ class StatusLayoutView(TxaView):
                 else:
                     body = "🔍 *Đang quét / chờ nhiệm vụ...*"
                 run_s = int(time.time() - info.get("start_timestamp", time.time()))
+                g = self.bot.get_guild(info.get("guild_id")) if info.get("guild_id") else None
+                where = f"🏠 {g.name}" if g else "🏠 (không rõ server)"
                 items.append(
-                    f"**🟢 {info.get('username')}** • <@{uid}>\n{body}\n"
+                    f"**🟢 {info.get('username')}** • <@{uid}> • {where}\n{body}\n"
                     f"🕒 Bắt đầu <t:{info.get('start_timestamp', 0)}:R> • đã chạy `{run_s // 3600:02d}h {run_s % 3600 // 60:02d}m`"
                 )
             if count > 5:

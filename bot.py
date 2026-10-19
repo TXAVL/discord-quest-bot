@@ -52,9 +52,12 @@ def save_channel_config(channel_id, guild_id=None):
     try:
         if not hasattr(config, 'SERVER_CHANNELS'):
             config.SERVER_CHANNELS = {}
-        config.CHANNEL_ID = channel_id
         if guild_id:
             config.SERVER_CHANNELS[str(guild_id)] = channel_id
+            if not config.CHANNEL_ID:
+                config.CHANNEL_ID = channel_id  # chỉ làm mặc định khi chưa có, không ghi đè server khác
+        else:
+            config.CHANNEL_ID = channel_id
         with open(CONFIG_FILE, "w") as f:
             json.dump({
                 "channel_id": channel_id,
@@ -63,6 +66,41 @@ def save_channel_config(channel_id, guild_id=None):
         log(f"Đã lưu cấu hình kênh hoạt động mới: {channel_id} (Guild: {guild_id})", "ok")
     except Exception as e:
         log(f"Không thể lưu cấu hình kênh: {e}", "error")
+
+
+def resolve_guild_channel_id(guild):
+    """Kênh hoạt động của RIÊNG server này (cấu hình riêng; server cũ chưa cấu hình thì dùng kênh mặc định nếu nó thuộc server đó)."""
+    if not guild:
+        return None
+    cid = (getattr(config, "SERVER_CHANNELS", None) or {}).get(str(guild.id))
+    if cid:
+        return int(cid)
+    if config.CHANNEL_ID and guild.get_channel(int(config.CHANNEL_ID)):
+        return int(config.CHANNEL_ID)
+    return None
+
+
+def is_panel_channel(interaction: discord.Interaction) -> bool:
+    """Nút/lệnh bắt đầu chỉ hoạt động đúng kênh hoạt động của chính server mà người dùng đang đứng."""
+    if not interaction.guild:
+        return False
+    return resolve_guild_channel_id(interaction.guild) == interaction.channel_id
+
+
+def panel_mention_for_user(user_id: int, fallback: str = "bảng điều khiển chính") -> str:
+    """Kênh hoạt động phù hợp cho người dùng: ưu tiên server đang chạy phiên, sau đó server chung có kênh."""
+    info = config.ACTIVE_USERS.get(user_id) or {}
+    candidates = []
+    if info.get("guild_id"):
+        g = bot.get_guild(info["guild_id"])
+        if g:
+            candidates.append(g)
+    candidates += [g for g in bot.guilds if g.get_member(user_id)]
+    for g in candidates:
+        cid = resolve_guild_channel_id(g)
+        if cid:
+            return f"<#{cid}>"
+    return fallback
 
 
 async def send_extension_guide(interaction: discord.Interaction):
@@ -790,6 +828,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
             'username': user_info.get('username', username),
             'start_timestamp': start_ts,
             'discord_user': interaction.user,
+            'guild_id': interaction.guild_id,
             'admin_records': admin_records
         }
 
@@ -933,7 +972,7 @@ async def build_session_details_response(user_id: int, discord_user: discord.Use
 
     # 1. TRƯỜNG HỢP: KHÔNG CÓ PHIÊN HOẠT ĐỘNG
     if user_id not in config.ACTIVE_USERS:
-        channel_mention = f"<#{config.CHANNEL_ID}>" if config.CHANNEL_ID else "Bảng điều khiển chính"
+        channel_mention = panel_mention_for_user(user_id, "Bảng điều khiển chính")
         embed = discord.Embed(
             title="📋 BÁO CÁO CHI TIẾT TÀI KHOẢN & SỐ DƯ QUEST",
             color=discord.Color.blue(),
@@ -1123,13 +1162,7 @@ class ControlView(discord.ui.View):
 
     @discord.ui.button(label="Bắt Đầu", style=discord.ButtonStyle.success, emoji="🚀", custom_id="btn_start")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        allowed_channels = set()
-        if config.CHANNEL_ID:
-            allowed_channels.add(config.CHANNEL_ID)
-        if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
-            allowed_channels.update(config.SERVER_CHANNELS.values())
-            
-        if allowed_channels and interaction.channel_id not in allowed_channels:
+        if not is_panel_channel(interaction):
             await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
 
@@ -1146,13 +1179,7 @@ class ControlView(discord.ui.View):
 
     @discord.ui.button(label="Chi Tiết", style=discord.ButtonStyle.secondary, emoji="📋", custom_id="btn_details")
     async def details_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        allowed_channels = set()
-        if config.CHANNEL_ID:
-            allowed_channels.add(config.CHANNEL_ID)
-        if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
-            allowed_channels.update(config.SERVER_CHANNELS.values())
-
-        if allowed_channels and interaction.channel_id not in allowed_channels:
+        if not is_panel_channel(interaction):
             await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
 
@@ -1162,13 +1189,7 @@ class ControlView(discord.ui.View):
 
     @discord.ui.button(label="Số Dư Quest", style=discord.ButtonStyle.primary, emoji="💎", custom_id="btn_quota")
     async def quota_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        allowed_channels = set()
-        if config.CHANNEL_ID:
-            allowed_channels.add(config.CHANNEL_ID)
-        if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
-            allowed_channels.update(config.SERVER_CHANNELS.values())
-
-        if allowed_channels and interaction.channel_id not in allowed_channels:
+        if not is_panel_channel(interaction):
             await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
 
@@ -1179,13 +1200,7 @@ class ControlView(discord.ui.View):
 
     @discord.ui.button(label="Hướng Dẫn", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="btn_guide")
     async def guide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        allowed_channels = set()
-        if config.CHANNEL_ID:
-            allowed_channels.add(config.CHANNEL_ID)
-        if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
-            allowed_channels.update(config.SERVER_CHANNELS.values())
-
-        if allowed_channels and interaction.channel_id not in allowed_channels:
+        if not is_panel_channel(interaction):
             await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
         
@@ -1348,50 +1363,48 @@ class QuestBot(commands.Bot):
         except Exception as e:
             log(f"Không thể nhắn chủ server {guild.id}: {e}", "warn")
 
+    async def _resolve_channel(self, cid):
+        ch = self.get_channel(cid)
+        if ch:
+            return ch
+        try:
+            return await self.fetch_channel(cid)
+        except Exception as fetch_err:
+            log(f"Chưa thể kết nối tới kênh ID {cid}: {fetch_err}", "warn")
+            return None
+
     async def update_control_panel(self, target_channel=None):
-        """Creates or updates the main statistics control panel embed across configured server channels."""
-        channels_to_update = []
-        seen_ids = set()
+        """Tạo/cập nhật Bảng điều khiển. MỖI SERVER CÓ BẢNG RIÊNG, chỉ hiện phiên và thống kê của chính server đó.
+        target_channel: chỉ cập nhật đúng kênh này, không đụng tới server khác."""
+        from limits_manager import get_guild_completed
+        channels = []
+        if target_channel is not None:
+            if hasattr(target_channel, "send"):
+                channels.append(target_channel)
+            elif str(target_channel).isdigit():
+                ch = await self._resolve_channel(int(target_channel))
+                if ch:
+                    channels.append(ch)
+        else:
+            mapped = getattr(config, "SERVER_CHANNELS", None) or {}
+            for cid in set(int(c) for c in mapped.values()):
+                ch = await self._resolve_channel(cid)
+                if ch:
+                    channels.append(ch)
+            # Kênh mặc định cũ: chỉ dùng nếu server chứa nó chưa có cấu hình riêng
+            if config.CHANNEL_ID and int(config.CHANNEL_ID) not in {int(c) for c in mapped.values()}:
+                ch = await self._resolve_channel(int(config.CHANNEL_ID))
+                if ch and str(getattr(getattr(ch, "guild", None), "id", "")) not in mapped:
+                    channels.append(ch)
 
-        if target_channel:
-            if isinstance(target_channel, (discord.TextChannel, discord.Thread, discord.abc.GuildChannel)) or hasattr(target_channel, "send"):
-                channels_to_update.append(target_channel)
-                seen_ids.add(target_channel.id)
-            elif isinstance(target_channel, (int, str)) and str(target_channel).isdigit():
-                seen_ids.add(int(target_channel))
-
-        if config.CHANNEL_ID:
-            seen_ids.add(config.CHANNEL_ID)
-        if hasattr(config, 'SERVER_CHANNELS') and config.SERVER_CHANNELS:
-            for cid in config.SERVER_CHANNELS.values():
-                seen_ids.add(cid)
-
-        # Resolve channel objects for any channel IDs not resolved yet
-        for cid in seen_ids:
-            if any(getattr(ch, 'id', None) == cid for ch in channels_to_update):
-                continue
-
-            ch = self.get_channel(cid)
-            if not ch:
-                for guild in self.guilds:
-                    ch = guild.get_channel(cid)
-                    if ch:
-                        break
-            if not ch:
-                try:
-                    ch = await self.fetch_channel(cid)
-                except Exception as fetch_err:
-                    log(f"Chưa thể kết nối tới kênh ID {cid}: {fetch_err}", "warn")
-                    continue
-            if ch:
-                channels_to_update.append(ch)
-
-        if not channels_to_update:
-            log("Chưa cấu hình kênh hoạt động nào. Chờ admin sử dụng lệnh /channel hoặc /setup_here.", "warn")
+        if not channels:
+            log("Chưa cấu hình kênh hoạt động nào. Bot sẽ tự tạo khi vào server mới, hoặc admin dùng /channel, /setup_here.", "warn")
             return
 
-        for channel in channels_to_update:
+        for channel in channels:
             try:
+                guild_id = getattr(getattr(channel, "guild", None), "id", None)
+                active_count = sum(1 for i in config.ACTIVE_USERS.values() if i.get("guild_id") == guild_id)
                 embed = discord.Embed(
                     title="🎯 Tự Động Hoàn Thành Quest Discord",
                     description=(
@@ -1401,17 +1414,15 @@ class QuestBot(commands.Bot):
                     color=discord.Color.blue()
                 )
                 embed.set_author(name="TXA")
-                
-                active_count = len(config.ACTIVE_USERS)
-                embed.add_field(name="👤 Phiên hiện tại", value=f"```\n{active_count:02d}\n```", inline=True)
+                embed.add_field(name="👤 Phiên tại server này", value=f"```\n{active_count:02d}\n```", inline=True)
                 embed.add_field(name="⏳ Hàng chờ", value="```\n00\n```", inline=True)
                 embed.add_field(name="▶️ Đang chạy", value=f"```\n{active_count:02d}\n```", inline=True)
-                embed.add_field(name="✅ Tổng quest đã hoàn thành", value=f"```\n{config.TOTAL_COMPLETED:02d}\n```", inline=False)
-                
+                embed.add_field(name="✅ Quest đã hoàn thành tại server này", value=f"```\n{get_guild_completed(guild_id):02d}\n```", inline=False)
+
                 current_time = time.strftime("%H:%M %d/%m/%y")
                 embed.set_footer(text=f"Auto Scan • Auto Accept • Auto Complete • {current_time} | Quest Bot v4.0 - Built by TXA")
 
-                # Clean old bot messages and send a clean panel
+                # Dọn tin nhắn cũ của bot trong kênh này rồi gửi bảng mới
                 try:
                     async for msg in channel.history(limit=15):
                         if msg.author == self.user:
@@ -1588,32 +1599,30 @@ def is_admin_or_owner(interaction: discord.Interaction) -> bool:
 # Slash Command: Start/Join guide (slash command)
 @bot.tree.command(name="start", description="Bắt đầu tự động làm quest hoặc hướng dẫn kênh hoạt động")
 async def start_command(interaction: discord.Interaction):
-    guild_id = str(interaction.guild_id) if interaction.guild else None
-    server_channel_id = config.SERVER_CHANNELS.get(guild_id) if (guild_id and hasattr(config, 'SERVER_CHANNELS')) else config.CHANNEL_ID
+    server_channel_id = resolve_guild_channel_id(interaction.guild)
 
-    if not server_channel_id and not config.CHANNEL_ID:
+    if not server_channel_id:
         await interaction.response.send_message(
-            "❌ **Cấu hình kênh hoạt động chưa được thiết lập!** Vui lòng liên hệ Admin sử dụng lệnh `/setup_here` hoặc `/channel`.",
+            "❌ **Server này chưa có kênh hoạt động!** Bot sẽ tự tạo Bảng điều khiển khi được mời vào server; "
+            "nếu chưa thấy, hãy nhờ chủ server mời lại bot bằng `/invite`.",
             ephemeral=True
         )
         return
 
-    allowed = (interaction.channel_id == server_channel_id) or (interaction.channel_id == config.CHANNEL_ID)
-    if allowed:
+    if is_panel_channel(interaction):
         from limits_manager import is_user_limited
         if is_user_limited(interaction.user.id):
             from payment_views import get_limit_embed_and_view, register_invoice
-            embed, view = get_limit_embed_and_view(interaction.user.id)
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            _, view = get_limit_embed_and_view(interaction.user.id)
+            await interaction.response.send_message(view=view, ephemeral=True)
             register_invoice(interaction, view)
             return
 
         modal = TokenModal(bot)
         await interaction.response.send_modal(modal)
     else:
-        active_mention = f"<#{server_channel_id}>" if server_channel_id else f"<#{config.CHANNEL_ID}>"
         await interaction.response.send_message(
-            f"📢 **Để bắt đầu làm quest, vui lòng truy cập kênh hoạt động:** {active_mention}\n"
+            f"📢 **Để bắt đầu làm quest, vui lòng truy cập kênh hoạt động của server này:** <#{server_channel_id}>\n"
             f"Tại đó, bạn có thể nhấn nút **Bắt Đầu** 🚀 hoặc sử dụng lệnh `/start` để nhập token.",
             ephemeral=True
         )
@@ -2003,17 +2012,21 @@ async def help_command(interaction: discord.Interaction):
 
 
 # Command: View active session details (slash command)
-@bot.tree.command(name="details", description="Xem chi tiết tiến độ nhiệm vụ thời gian thực hoặc số dư của bạn")
-async def details_command(interaction: discord.Interaction):
+async def send_session_details(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     embed, view = await build_session_details_response(interaction.user.id, interaction.user, bot)
     await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
+@bot.tree.command(name="details", description="Xem chi tiết tiến độ nhiệm vụ thời gian thực hoặc số dư của bạn")
+async def details_command(interaction: discord.Interaction):
+    await send_session_details(interaction)
+
+
 # Command: View active user quests (slash command alias for details)
 @bot.tree.command(name="my_quests", description="Xem trạng thái các quest và nhận phần thưởng Gift Code")
 async def my_quests(interaction: discord.Interaction):
-    await details_command(interaction)
+    await send_session_details(interaction)
 
 
 # Command: View detailed active user Discord info (slash command)
@@ -2021,7 +2034,7 @@ async def my_quests(interaction: discord.Interaction):
 async def user_info_command(interaction: discord.Interaction):
     user_id = interaction.user.id
     if user_id not in config.ACTIVE_USERS:
-        channel_mention = f"<#{config.CHANNEL_ID}>" if config.CHANNEL_ID else "bảng điều khiển chính"
+        channel_mention = panel_mention_for_user(interaction.user.id)
         await interaction.response.send_message(
             f"❌ **Bạn hiện không có phiên hoạt động nào!**\n"
             f"Vui lòng truy cập {channel_mention} để bắt đầu.",
@@ -2114,7 +2127,7 @@ async def system_stats(interaction: discord.Interaction):
 async def stop_my_session(interaction: discord.Interaction):
     user_id = interaction.user.id
     if user_id not in config.ACTIVE_USERS:
-        channel_mention = f"<#{config.CHANNEL_ID}>" if config.CHANNEL_ID else "bảng điều khiển chính"
+        channel_mention = panel_mention_for_user(interaction.user.id)
         await interaction.response.send_message(
             f"❌ **Tài khoản của bạn hiện không có phiên hoạt động nào đang chạy!**\n"
             f"Vui lòng truy cập {channel_mention} để bắt đầu.",

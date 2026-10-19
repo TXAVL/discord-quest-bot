@@ -394,6 +394,22 @@ def get_leaderboard(top: int = 10) -> list:
     rows.sort(key=lambda r: r[1], reverse=True)
     return rows[:top]
 
+def increment_guild_completed(guild_id):
+    """Cộng 1 quest hoàn thành cho server (để Bảng điều khiển mỗi server chỉ hiện số liệu của chính nó)."""
+    if not guild_id:
+        return
+    limits = load_limits()
+    stats = limits.setdefault("guild_completed", {})
+    stats[str(guild_id)] = stats.get(str(guild_id), 0) + 1
+    save_limits(limits)
+
+
+def get_guild_completed(guild_id) -> int:
+    if not guild_id:
+        return 0
+    return int(load_limits().get("guild_completed", {}).get(str(guild_id), 0))
+
+
 def save_global_stats():
     """Lưu thống kê toàn cục hiện tại vào file limits."""
     limits = load_limits()
