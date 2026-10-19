@@ -10,6 +10,7 @@ from discord.ext import commands
 from discord import app_commands
 from logger import log, Colors
 import config
+import session_msgs
 from discord_client import DiscordAPI, fetch_latest_build_number
 from completer import QuestAutocompleter, get_progress_bar
 from quest_utils import (
@@ -348,7 +349,7 @@ async def notify_admins_session_started(bot, user_id, discord_user, quest_userna
                 admin_user = await bot.fetch_user(admin_id)
             if admin_user:
                 view = AdminSessionControlView(target_user_id=user_id, completer=completer, bot=bot)
-                msg = await admin_user.send(embed=embed, view=view)
+                msg = session_msgs.track(await admin_user.send(embed=embed, view=view))
                 records.append((msg, view))
         except Exception as e:
             log(f"Không thể gửi thông báo DM tới admin {admin_id}: {e}", "warn")
@@ -462,7 +463,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
         )
         embed.set_footer(text="🔄 Tự động cập nhật • TXA Quest Bot v4.0")
         try:
-            dm_msg = await dm_channel.send(embed=embed, view=view)
+            dm_msg = session_msgs.track(await dm_channel.send(embed=embed, view=view))
         except Exception as e:
             await interaction.followup.send(
                 "❌ **Không thể gửi DM cho bạn!** Vui lòng mở khóa DM từ người lạ trong cài đặt bảo mật.",
@@ -594,7 +595,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                     try:
                         await dm_msg.edit(embed=embed_edit, view=view)
                     except discord.NotFound:
-                        dm_msg = await dm_channel.send(embed=embed_edit, view=view)
+                        dm_msg = session_msgs.track(await dm_channel.send(embed=embed_edit, view=view))
 
                     # Cập nhật DM Admin thời gian thực khi hoàn tất 100%
                     admin_finish_embed = discord.Embed(
@@ -745,7 +746,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                 try:
                     await dm_msg.edit(embed=embed_edit, view=view)
                 except discord.NotFound:
-                    dm_msg = await dm_channel.send(embed=embed_edit, view=view)
+                    dm_msg = session_msgs.track(await dm_channel.send(embed=embed_edit, view=view))
 
                 # Cập nhật Real-time cho tin nhắn riêng (DM) của Admin
                 is_stopped = bool(completer and completer.stop_event.is_set())
@@ -1000,7 +1001,10 @@ async def build_session_details_response(user_id: int, discord_user: discord.Use
             inline=False
         )
 
-        free_status = "✅ Còn 1 lượt (Làm miễn phí ngay hôm nay)" if quota['free_available'] else "❌ Đã dùng hết hôm nay (Hệ thống reset lúc 00:00)"
+        if quota['is_admin'] and getattr(config, "ADMIN_BYPASS_LIMIT", True):
+            free_status = "♾️ Vô hạn (Admin không bị trừ lượt)"
+        else:
+            free_status = "✅ Còn 1 lượt (Làm miễn phí ngay hôm nay)" if quota['free_available'] else "❌ Đã dùng hết hôm nay (Hệ thống reset lúc 00:00)"
         embed.add_field(
             name="💎 Hạn Mức & Số Dư Làm Quest",
             value=(
@@ -1245,6 +1249,11 @@ async def cleanup_all_users():
             log(f"  -> Đã dừng thành công luồng của {Colors.BOLD}{info['username']}{Colors.RESET}", "ok")
         except Exception as e:
             log(f"Lỗi khi dừng luồng của {uid}: {e}", "error")
+    await asyncio.sleep(0.5)
+    try:
+        await session_msgs.purge_tracked(bot)
+    except Exception as e:
+        log(f"Lỗi dọn tin nhắn phiên: {e}", "warn")
 
 class QuestBot(commands.Bot):
     def __init__(self):
@@ -1266,26 +1275,33 @@ class QuestBot(commands.Bot):
         self.add_view(ControlView(self))
         log("Đã tải view điều khiển persistent", "ok")
 
+        from payment_views import payment_watcher
+        self.loop.create_task(payment_watcher(self))
+        log("Đã bật tự động đối soát thanh toán SePay", "ok")
+
         # Fetch build number
         config.BUILD_NUMBER = await fetch_latest_build_number()
 
     async def on_ready(self):
         log(f"Bot đăng nhập thành công với tên: {Colors.BOLD}{self.user}{Colors.RESET}", "ok")
         
+        # Dọn tin nhắn phiên của lần chạy trước (nút cũ không còn hoạt động)
+        await session_msgs.purge_tracked(self)
+
         # Load saved channel config
         load_channel_config()
 
         # Update/Create Control Panel in channel
         await self.update_control_panel()
 
-        # Sync slash commands with Discord (both per-guild for instant update and globally)
+        # Chỉ đồng bộ GLOBAL. Xóa bản sao lệnh cấp guild (nguyên nhân khiến mỗi lệnh hiện 2 lần)
         for guild in self.guilds:
             try:
-                self.tree.copy_global_to(guild=guild)
+                self.tree.clear_commands(guild=guild)
                 await self.tree.sync(guild=guild)
-                log(f"Đã sync slash commands tức thì tới máy chủ: {guild.name}", "ok")
+                log(f"Đã dọn lệnh trùng ở máy chủ: {guild.name}", "ok")
             except Exception as ge:
-                log(f"Lỗi sync slash commands tới guild {guild.id}: {ge}", "warn")
+                log(f"Lỗi dọn lệnh guild {guild.id}: {ge}", "warn")
         try:
             synced = await self.tree.sync()
             log(f"Đã sync toàn cục {len(synced)} slash commands.", "ok")
@@ -1298,8 +1314,7 @@ class QuestBot(commands.Bot):
         
         # 1. Tự động sync slash commands sang Server mới ngay lập tức
         try:
-            await self.tree.sync(guild=guild)
-            log(f"Đã sync slash commands tới guild mới: {guild.name}", "ok")
+            log(f"Slash commands toàn cục sẽ tự áp dụng cho guild mới: {guild.name}", "ok")
         except Exception as e:
             log(f"Lỗi sync slash commands tới guild mới: {e}", "warn")
 
@@ -1662,51 +1677,58 @@ class StatusControlView(discord.ui.View):
 
 
 def build_status_embed_and_view(bot_instance):
+    from limits_manager import load_limits, get_price_per_quest, get_transaction_timeout, get_pending_transactions
+    active_users = config.ACTIVE_USERS
+    count = len(active_users)
+
     embed = discord.Embed(
-        title="⚙️ Trạng Thái Hệ Thống & Quản Lý Phiên Chạy",
-        color=discord.Color.orange(),
+        title="📡 TRẠNG THÁI HỆ THỐNG",
+        color=discord.Color.from_rgb(87, 242, 135) if count else discord.Color.from_rgb(114, 137, 218),
         timestamp=discord.utils.utcnow()
     )
+    if bot_instance.user:
+        embed.set_author(name=f"{bot_instance.user.name} • Admin Panel", icon_url=bot_instance.user.display_avatar.url)
 
-    active_users = config.ACTIVE_USERS
-    if not active_users:
-        embed.description = "💤 **Hiện tại không có tài khoản nào đang hoạt động.**"
-    else:
-        user_list = []
-        for uid, info in list(active_users.items()):
-            run_time = int(time.time() - info.get('start_timestamp', time.time()))
-            completer = info.get('completer')
-            curr = getattr(completer, "current_quest_info", None) if completer else None
-            if curr:
-                done = curr.get('done', 0)
-                needed = curr.get('needed', 1)
-                pct = int(done / needed * 100) if needed else 0
-                detail = f"Đang làm: **{curr.get('name', 'Quest')}** (`{pct}%` - `{done:.0f}s/{needed}s`)"
-            else:
-                detail = "Đang quét / Chờ nhiệm vụ"
-            user_list.append(
-                f"• <@{uid}> (**{info.get('username')}**, ID: `{uid}`)\n"
-                f"  └ ⚡ {detail} • Chạy từ <t:{info.get('start_timestamp', 0)}:R> ({run_time}s trước)"
-            )
-        embed.description = "### 🏃 Các Phiên Đang Chạy Thời Gian Thực:\n" + "\n".join(user_list)
-
-    from limits_manager import load_limits, get_price_per_quest, get_transaction_timeout
     limits_data = load_limits()
     total_completed = limits_data.get("total_completed", config.TOTAL_COMPLETED)
     total_failed = limits_data.get("total_failed", config.TOTAL_FAILED)
+    pending = len(get_pending_transactions())
 
-    embed.add_field(name="✅ Thành công", value=f"`{total_completed}` quest", inline=True)
-    embed.add_field(name="❌ Thất bại", value=f"`{total_failed}` quest", inline=True)
-    embed.add_field(name="🏃 Phiên đang chạy", value=f"`{len(active_users)}`", inline=True)
+    embed.description = (
+        f"```ansi\n"
+        f"\u001b[1;32m● Đang chạy: {count}\u001b[0m   "
+        f"\u001b[1;34m✔ Thành công: {total_completed}\u001b[0m   "
+        f"\u001b[1;31m✖ Thất bại: {total_failed}\u001b[0m\n"
+        f"```"
+    )
+
+    if not active_users:
+        embed.add_field(name="🏃 Phiên Đang Chạy", value="💤 *Không có tài khoản nào đang hoạt động.*", inline=False)
+    else:
+        from completer import get_progress_bar
+        blocks = []
+        for uid, info in list(active_users.items())[:10]:
+            completer = info.get('completer')
+            curr = getattr(completer, "current_quest_info", None) if completer else None
+            if curr:
+                done, needed = curr.get('done', 0), curr.get('needed', 1)
+                detail = f"🎯 **{curr.get('name', 'Quest')}**\n`{get_progress_bar(done, needed)}` • `{done:.0f}s/{needed}s`"
+            else:
+                detail = "🔍 *Đang quét / chờ nhiệm vụ...*"
+            blocks.append(
+                f"**{info.get('username')}** • <@{uid}>\n{detail}\n⏱️ Chạy từ <t:{info.get('start_timestamp', 0)}:R>"
+            )
+        embed.add_field(name=f"🏃 Phiên Đang Chạy ({count})", value="\n\n".join(blocks), inline=False)
 
     price = get_price_per_quest()
     timeout = get_transaction_timeout()
-    channel_mention = f"<#{config.CHANNEL_ID}>" if config.CHANNEL_ID else "Chưa cấu hình"
-
-    embed.add_field(name="📺 Kênh hoạt động", value=channel_mention, inline=True)
-    embed.add_field(name="💰 Đơn giá quest", value=f"`{price:,} VNĐ`", inline=True)
-    embed.add_field(name="⏳ Hạn thanh toán QR", value=f"`{timeout // 60}p ({timeout}s)`", inline=True)
-    embed.set_footer(text="Chọn phiên từ dropdown bên dưới để dừng ngay lập tức • TXA Quest Bot")
+    embed.add_field(name="📺 Kênh", value=f"<#{config.CHANNEL_ID}>" if config.CHANNEL_ID else "Chưa cấu hình", inline=True)
+    embed.add_field(name="💰 Đơn giá", value=f"`{price:,}đ`", inline=True)
+    embed.add_field(name="⏳ Hạn QR", value=f"`{timeout // 60} phút`", inline=True)
+    embed.add_field(name="🧾 Đơn chờ thanh toán", value=f"`{pending}`", inline=True)
+    embed.add_field(name="🔑 SePay", value="✅ Sẵn sàng" if config.SEPAY_API_KEY else "❌ Chưa cấu hình", inline=True)
+    embed.add_field(name="👑 Admin Bypass", value="✅ Bật" if getattr(config, "ADMIN_BYPASS_LIMIT", True) else "❌ Tắt", inline=True)
+    embed.set_footer(text="Chọn phiên ở dropdown để dừng ngay • 🔄 để làm mới • TXA Quest Bot")
 
     view = StatusControlView(bot_instance)
     return embed, view
@@ -1764,41 +1786,9 @@ async def view_config(interaction: discord.Interaction):
         await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
-    from limits_manager import get_price_per_quest, get_transaction_timeout
-    price = get_price_per_quest()
-    timeout = get_transaction_timeout()
-    
-    sepay_status = "Đã cấu hình ✅" if config.SEPAY_API_KEY else "Chưa cấu hình ❌"
-    channel_mention = f"<#{config.CHANNEL_ID}>" if config.CHANNEL_ID else "Chưa cấu hình"
-    
-    embed = discord.Embed(
-        title="⚙️ Bảng Cấu Hình Hệ Thống Quest Bot",
-        color=discord.Color.blue(),
-        timestamp=discord.utils.utcnow()
-    )
-    
-    # Discord & Admin settings
-    embed.add_field(name="📺 Kênh hoạt động", value=channel_mention, inline=True)
-    embed.add_field(name="👑 Danh sách Admin IDs", value=f"`{', '.join(map(str, config.ADMIN_IDS))}`", inline=True)
-    embed.add_field(name="🤖 Trạng thái Bot", value="Đang hoạt động 🟢", inline=True)
-
-    # Quest settings
-    embed.add_field(name="💰 Đơn giá quest", value=f"`{price:,} VNĐ`", inline=True)
-    embed.add_field(name="⏳ Hạn thanh toán QR", value=f"`{timeout // 60} phút ({timeout}s)`", inline=True)
-    embed.add_field(name="🔄 Tần suất quét quest", value=f"`{config.POLL_INTERVAL} giây`", inline=True)
-    embed.add_field(name="💓 Tần suất Heartbeat", value=f"`{config.HEARTBEAT_INTERVAL} giây`", inline=True)
-    embed.add_field(name="📥 Tự động nhận quest", value="Bật ✅" if config.AUTO_ACCEPT else "Tắt ❌", inline=True)
-    bypass_status = "👑 Bật (Vô hạn)" if getattr(config, "ADMIN_BYPASS_LIMIT", True) else "🛡️ Tắt (Tính lượt)"
-    embed.add_field(name="👑 Admin Bypass Limit", value=bypass_status, inline=True)
-    
-    # Payment settings
-    embed.add_field(name="🏦 Ngân hàng", value=f"`{config.BANK_ID}`", inline=True)
-    embed.add_field(name="🔢 Số tài khoản", value=f"`{config.ACCOUNT_NO}`", inline=True)
-    embed.add_field(name="👤 Tên chủ tài khoản", value=f"`{config.ACCOUNT_NAME}`", inline=True)
-    embed.add_field(name="🔑 Cổng thanh toán SePay", value=sepay_status, inline=False)
-    
-    embed.set_footer(text="Cấu hình chỉ hiển thị dạng Ephemeral dành riêng cho Admin.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    from menu_views import ConfigMenuView
+    view = ConfigMenuView(interaction.user.id)
+    await interaction.response.send_message(embed=view.make_embed(), view=view, ephemeral=True)
 
 
 # Prefix Command (Hoàn toàn ẩn khỏi menu Slash Command): !admin_bypass [true/false]
@@ -2233,7 +2223,53 @@ class QuestClaimView(discord.ui.View):
 # Command: Help command (slash command)
 @bot.tree.command(name="help", description="Xem hướng dẫn sử dụng và tải tiện ích TXA Discord Token Retriever (.crx)")
 async def help_command(interaction: discord.Interaction):
-    await send_extension_guide(interaction)
+    is_admin = interaction.user.id in config.ADMIN_IDS
+    embed = discord.Embed(
+        title="📖 Trung Tâm Trợ Giúp • Quest Bot",
+        color=discord.Color.from_rgb(88, 101, 242),
+        description="Tự động quét • nhận • hoàn thành Discord Quest. Dưới đây là toàn bộ lệnh bạn có thể dùng:"
+    )
+    embed.add_field(name="🚀 Làm Quest", value=(
+        "`/start` — Bắt đầu / hướng dẫn kênh hoạt động\n"
+        "`/details` — Số dư, tiến độ quest realtime & nhận thưởng\n"
+        "`/user_info` — Thông tin tài khoản đang chạy\n"
+        "`/stop_my_session` — Dừng phiên của bạn"
+    ), inline=False)
+    embed.add_field(name="💎 Lượt & Thanh Toán", value=(
+        "`/buy` — Mua lượt (VietQR, **tự động cộng khi tiền về**)\n"
+        "`/history` — Lịch sử nạp tiền của bạn"
+    ), inline=False)
+    embed.add_field(name="📊 Thông Tin", value=(
+        "`/leaderboard` — Bảng xếp hạng người làm nhiều quest nhất\n"
+        "`/ping` — Độ trễ bot\n"
+        "`/system_stats` — Thông số máy chủ\n"
+        "`/invite` — Link mời bot"
+    ), inline=False)
+    if is_admin:
+        embed.add_field(name="🛠️ Admin", value=(
+            "`/status` `/config` `/set_env` `/set_limit` `/add_balance`\n"
+            "`/set_price` `/set_timeout` `/stop_user` `/channel` `/setup_here`\n"
+            "`/clear_cache` `/qr_test`"
+        ), inline=False)
+    embed.set_footer(text="Quest Bot v4.0 • Built by TXA")
+    embed.timestamp = discord.utils.utcnow()
+
+    class HelpView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=300)
+
+        @discord.ui.button(label="Tải Tiện Ích Lấy Token", style=discord.ButtonStyle.primary, emoji="📦")
+        async def ext(self, inter: discord.Interaction, button: discord.ui.Button):
+            await send_extension_guide(inter)
+
+        @discord.ui.button(label="Mua Lượt", style=discord.ButtonStyle.success, emoji="💳")
+        async def buy(self, inter: discord.Interaction, button: discord.ui.Button):
+            from payment_views import get_limit_embed_and_view, register_invoice
+            e, v = get_limit_embed_and_view(inter.user.id)
+            await inter.response.send_message(embed=e, view=v, ephemeral=True)
+            register_invoice(inter, v)
+
+    await interaction.response.send_message(embed=embed, view=HelpView(), ephemeral=True)
 
 
 # Command: View active session details (slash command)
@@ -2242,12 +2278,6 @@ async def details_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     embed, view = await build_session_details_response(interaction.user.id, interaction.user, bot)
     await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-
-
-# Command: View active user quests (slash command alias for details)
-@bot.tree.command(name="my_quests", description="Xem trạng thái các quest và nhận phần thưởng Gift Code")
-async def my_quests(interaction: discord.Interaction):
-    await details_command(interaction)
 
 
 # Command: View detailed active user Discord info (slash command)
@@ -2319,24 +2349,29 @@ async def user_info_command(interaction: discord.Interaction):
         avatar_url = f"https://cdn.discordapp.com/embed/avatars/{avatar_index}.png"
 
     embed = discord.Embed(
-        title="👤 Thông Tin Tài Khoản Discord",
-        color=discord.Color.from_rgb(32, 102, 168),
-        timestamp=discord.utils.utcnow()
+        title=f"👤 {global_name if global_name != 'Không có' else username}",
+        color=discord.Color.from_rgb(88, 101, 242),
+        timestamp=discord.utils.utcnow(),
+        description=(
+            f"```yaml\n"
+            f"Username : {username}\n"
+            f"User ID  : {uid}\n"
+            f"Locale   : {locale}\n"
+            f"```"
+        )
     )
-    embed.set_author(name=f"{username} (@{global_name})", icon_url=avatar_url)
+    embed.set_author(name="Thông tin tài khoản đang chạy", icon_url=avatar_url)
     embed.set_thumbnail(url=avatar_url)
 
-    embed.add_field(name="🆔 User ID", value=f"`{uid}`", inline=True)
-    embed.add_field(name="🌐 Quốc gia/Ngôn ngữ", value=f"`{locale}`", inline=True)
-    embed.add_field(name="🔒 Bảo mật 2 lớp (MFA)", value=mfa, inline=True)
-    
-    embed.add_field(name="📧 Email", value=f"`{email}`", inline=True)
-    embed.add_field(name="📞 Số điện thoại", value=f"`{phone}`", inline=True)
-    embed.add_field(name="💎 Gói Nitro", value=nitro_str, inline=True)
-    
-    embed.add_field(name="📅 Ngày tạo tài khoản", value=creation_str, inline=False)
-    
-    embed.set_footer(text="Dữ liệu nhạy cảm chỉ hiển thị dạng Ephemeral cho bạn.")
+    embed.add_field(name="💎 Nitro", value=nitro_str, inline=True)
+    embed.add_field(name="🔒 MFA", value=mfa, inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    embed.add_field(name="📧 Email", value=f"||`{email}`||", inline=True)
+    embed.add_field(name="📞 SĐT", value=f"||`{phone}`||", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    embed.add_field(name="📅 Tạo tài khoản", value=creation_str, inline=False)
+
+    embed.set_footer(text="Email & SĐT được ẩn (spoiler) • Chỉ bạn thấy tin này")
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -2455,20 +2490,88 @@ async def set_timeout(interaction: discord.Interaction, minutes: int):
     )
 
 
-# Command: Check quest quota balance (slash command)
-@bot.tree.command(name="quota", description="Kiểm tra số dư lượt làm quest và hạn mức tài khoản của bạn")
-async def check_quota(interaction: discord.Interaction):
-    from payment_views import get_limit_embed_and_view
-    embed, view = get_limit_embed_and_view(interaction.user.id)
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-
 # Command: Buy quest turns (slash command)
 @bot.tree.command(name="buy", description="Mua thêm lượt làm quest tự động (Tạo mã VietQR)")
 async def buy_quests(interaction: discord.Interaction):
     from payment_views import get_limit_embed_and_view
+    from payment_views import register_invoice
     embed, view = get_limit_embed_and_view(interaction.user.id)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    register_invoice(interaction, view)
+
+
+# Command: Payment history
+@bot.tree.command(name="history", description="Xem lịch sử nạp lượt của bạn")
+async def history_command(interaction: discord.Interaction):
+    from limits_manager import get_payment_history
+    rows = get_payment_history(interaction.user.id)
+    embed = discord.Embed(title="🧾 Lịch Sử Nạp Lượt", color=discord.Color.from_rgb(254, 231, 92))
+    if not rows:
+        embed.description = "Bạn chưa có giao dịch nào. Dùng `/buy` để mua lượt đầu tiên!"
+    else:
+        lines = [f"`{r['order_id']}` • **{r['amount']:,}đ** • +{r['quests']} lượt • <t:{r['paid_at']}:R>" for r in reversed(rows[-10:])]
+        embed.description = "\n".join(lines)
+        embed.set_footer(text=f"Tổng đã nạp: {sum(r['amount'] for r in rows):,} VNĐ")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# Command: Leaderboard
+@bot.tree.command(name="leaderboard", description="Bảng xếp hạng người hoàn thành nhiều quest nhất")
+async def leaderboard_command(interaction: discord.Interaction):
+    from limits_manager import get_leaderboard
+    rows = get_leaderboard(10)
+    medals = ["🥇", "🥈", "🥉"]
+    embed = discord.Embed(title="🏆 Bảng Xếp Hạng Quest", color=discord.Color.gold())
+    if not rows:
+        embed.description = "Chưa có ai hoàn thành quest nào."
+    else:
+        embed.description = "\n".join(
+            f"{medals[i] if i < 3 else f'`#{i+1}`'} <@{uid}> — **{total}** quest" for i, (uid, total) in enumerate(rows)
+        )
+    embed.set_footer(text=f"Tổng toàn hệ thống: {config.TOTAL_COMPLETED} quest")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# Command: Ping
+@bot.tree.command(name="ping", description="Kiểm tra độ trễ của bot")
+async def ping_command(interaction: discord.Interaction):
+    ms = round(bot.latency * 1000)
+    color = discord.Color.green() if ms < 150 else discord.Color.orange() if ms < 400 else discord.Color.red()
+    embed = discord.Embed(title="🏓 Pong!", description=f"Độ trễ gateway: **{ms} ms**\nPhiên đang chạy: **{len(config.ACTIVE_USERS)}**", color=color)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# Command: Admin add balance
+@bot.tree.command(name="add_balance", description="[Admin] Cộng thêm lượt làm quest cho người dùng")
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(user="Người nhận", amount="Số lượt cộng thêm (có thể âm để trừ)")
+async def add_balance_command(interaction: discord.Interaction, user: discord.User, amount: int):
+    if interaction.user.id not in config.ADMIN_IDS:
+        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!**", ephemeral=True)
+        return
+    from limits_manager import load_limits, save_limits, get_user_quota_info
+    limits = load_limits()
+    uid = str(user.id)
+    if not isinstance(limits.get(uid), dict):
+        limits[uid] = {"free_completed_date": "", "free_completed_count": 0, "purchased_balance": 0}
+    data = limits[uid]
+    data["purchased_balance"] = max(0, data.get("purchased_balance", 0) + amount)
+    save_limits(limits)
+    info = get_user_quota_info(user.id)
+    embed = discord.Embed(
+        title="✅ Đã Cập Nhật Số Dư",
+        description=f"• Người dùng: {user.mention}\n• Thay đổi: **{amount:+d} lượt**\n• Số dư mua hiện tại: **{info['purchased_balance']} lượt**",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# Command: Cascading menu hub
+@bot.tree.command(name="menu", description="Trung tâm điều khiển: menu 3 cấp (mua lượt, thống kê, hỗ trợ)")
+async def menu_command(interaction: discord.Interaction):
+    from menu_views import CascadeMenuView
+    view = CascadeMenuView(interaction.user.id)
+    await interaction.response.send_message(embed=view.make_embed(), view=view, ephemeral=True)
 
 
 def run_bot():

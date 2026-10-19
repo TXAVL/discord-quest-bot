@@ -314,98 +314,57 @@ def get_realtime_quest_stats() -> Tuple[int, int]:
 
 
 def build_system_embed(bot, bot_start_time: float) -> discord.Embed:
-    """Tạo Embed thống kê hệ thống chuẩn giao diện hiện đại với Discord Dynamic Timestamp."""
+    """Embed thống kê hệ thống dạng bảng điều khiển gọn, 3 cột."""
     now = time.time()
     uptime_seconds = int(now - bot_start_time)
     start_ts = int(bot_start_time)
 
-    # Chi tiết thời gian chạy tính đến hiện tại
-    days = uptime_seconds // 86400
-    hours = (uptime_seconds % 86400) // 3600
-    mins = (uptime_seconds % 3600) // 60
-    secs = uptime_seconds % 60
-    uptime_parts = []
-    if days > 0:
-        uptime_parts.append(f"{days} ngày")
-    if hours > 0 or days > 0:
-        uptime_parts.append(f"{hours} giờ")
-    if mins > 0 or hours > 0 or days > 0:
-        uptime_parts.append(f"{mins} phút")
-    uptime_parts.append(f"{secs} giây")
-    exact_duration = " ".join(uptime_parts)
+    days, rem = divmod(uptime_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, secs = divmod(rem, 60)
+    exact_duration = (f"{days}d " if days else "") + f"{hours:02d}:{mins:02d}:{secs:02d}"
 
-    os_desc = get_os_info()
     cpu = get_cpu_info()
     ram = get_ram_info()
     disk = get_disk_info()
     bot_ram_mb = get_process_memory()
-
-    # Latency ping
     latency_ms = round(bot.latency * 1000) if hasattr(bot, "latency") and bot.latency is not None else 0
-
-    # Lấy thông số phiên và quest thời gian thực
     active_sessions = get_active_sessions_count()
     total_completed, total_failed = get_realtime_quest_stats()
 
-    embed = discord.Embed(
-        title="⚡ BẢNG ĐIỀU KHIỂN HỆ THỐNG & HIỆU NĂNG BOT",
-        color=discord.Color.from_rgb(88, 101, 242), # Discord Blurple
-        timestamp=discord.utils.utcnow()
-    )
+    worst = max(cpu["percent"], ram["percent"], disk["percent"])
+    color = (discord.Color.from_rgb(87, 242, 135) if worst < 70
+             else discord.Color.from_rgb(254, 231, 92) if worst < 90
+             else discord.Color.from_rgb(237, 66, 69))
 
+    embed = discord.Embed(title="⚡ SYSTEM MONITOR", color=color, timestamp=discord.utils.utcnow())
     if bot.user:
-        embed.set_author(name=f"{bot.user.name} • System Monitor", icon_url=bot.user.display_avatar.url)
+        embed.set_author(name=f"{bot.user.name} • Realtime", icon_url=bot.user.display_avatar.url)
+        embed.set_thumbnail(url=bot.user.display_avatar.url)
 
-    # Khối 1: Bot Status & Uptime Realtime
+    embed.description = (
+        f"🟢 Online từ <t:{start_ts}:R> • Uptime `{exact_duration}`\n"
+        f"```yaml\n"
+        f"CPU : {make_bar(cpu['percent'])} {cpu['percent']}%\n"
+        f"RAM : {make_bar(ram['percent'])} {ram['percent']}%\n"
+        f"DISK: {make_bar(disk['percent'])} {disk['percent']}%\n"
+        f"```"
+    )
+
+    embed.add_field(name="📶 Ping", value=f"`{latency_ms} ms`", inline=True)
+    embed.add_field(name="👥 Phiên", value=f"`{active_sessions}`", inline=True)
+    embed.add_field(name="📦 RAM Bot", value=f"`{bot_ram_mb} MB`", inline=True)
+    embed.add_field(name="✅ Thành công", value=f"`{total_completed}`", inline=True)
+    embed.add_field(name="❌ Thất bại", value=f"`{total_failed}`", inline=True)
+    embed.add_field(name="🐍 Runtime", value=f"`Py {platform.python_version()}` • `dpy {discord.__version__ if discord else '2.x'}`", inline=True)
+    embed.add_field(name="🖥️ Máy chủ", value=f"`{get_os_info()}`\n`{cpu['model']}` • {cpu['cores']} nhân", inline=False)
     embed.add_field(
-        name="🤖 Trạng Thái & Thời Gian Hoạt Động",
-        value=(
-            f"• ⏱️ **Uptime Real-time:** <t:{start_ts}:R>\n"
-            f"• 🕒 **Khởi động lúc:** <t:{start_ts}:F>\n"
-            f"• ⏳ **Tổng thời gian chạy:** `{exact_duration}`\n"
-            f"• 📶 **Độ trễ Discord (Ping):** `⚡ {latency_ms} ms`\n"
-            f"• 👥 **Phiên đang hoạt động:** `🟢 {active_sessions} tài khoản`\n"
-            f"• 🎯 **Tổng Quest:** `✅ {total_completed}` thành công | `❌ {total_failed}` thất bại"
-        ),
+        name="💾 Bộ nhớ",
+        value=f"RAM `{ram['used_gb']}/{ram['total_gb']} GB` • Đĩa `{disk['used_gb']}/{disk['total_gb']} GB`",
         inline=False
     )
 
-    # Khối 2: Máy chủ & CPU
-    cpu_bar = make_bar(cpu["percent"])
-    embed.add_field(
-        name="🖥️ Phần Cứng & Bộ Vi Xử Lý",
-        value=(
-            f"• **Hệ điều hành:** `{os_desc}`\n"
-            f"• **CPU Model:** `{cpu['model']}`\n"
-            f"• **Số nhân:** `{cpu['cores']} Logical Cores`\n"
-            f"• **Mức tải CPU:** `{cpu_bar} {cpu['percent']}%`"
-        ),
-        inline=False
-    )
-
-    # Khối 3: RAM & Ổ đĩa
-    ram_bar = make_bar(ram["percent"])
-    disk_bar = make_bar(disk["percent"])
-    embed.add_field(
-        name="💾 Bộ Nhớ (RAM) & Lưu Trữ (Disk)",
-        value=(
-            f"• **RAM hệ thống:** `{ram_bar} {ram['percent']}%`\n"
-            f"  └─ `{ram['used_gb']} GB` / `{ram['total_gb']} GB`\n"
-            f"• **RAM Bot tiêu thụ:** `📦 {bot_ram_mb} MB`\n"
-            f"• **Dung lượng đĩa:** `{disk_bar} {disk['percent']}%`\n"
-            f"  └─ `{disk['used_gb']} GB` / `{disk['total_gb']} GB`"
-        ),
-        inline=False
-    )
-
-    # Khối 4: Môi trường Runtime
-    embed.add_field(
-        name="🐍 Môi Trường Thực Thi",
-        value=f"`Python {platform.python_version()}` • `discord.py v{discord.__version__ if discord else '2.x'}`",
-        inline=False
-    )
-
-    embed.set_footer(text=f"Cập nhật lúc {datetime.now().strftime('%H:%M:%S')} • Tin nhắn riêng tư chỉ bạn thấy")
+    embed.set_footer(text=f"Cập nhật {datetime.now().strftime('%H:%M:%S')} • Chỉ bạn thấy tin này")
     return embed
 
 

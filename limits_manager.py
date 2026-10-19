@@ -99,11 +99,11 @@ def consume_limit(user_id: int) -> bool:
     return True
 
 def generate_order_id(limits: dict) -> str:
-    """Tạo mã đơn hàng ngẫu nhiên duy nhất dạng QB[A-Z]{2}[0-9]{4}."""
+    """Tạo mã đơn hàng ngẫu nhiên duy nhất dạng TQB[A-Z]{2}[0-9]{4}."""
     while True:
         letters = "".join(random.choices(string.ascii_uppercase, k=2))
         digits = "".join(random.choices(string.digits, k=4))
-        order_id = f"QB{letters}{digits}"
+        order_id = f"TQB{letters}{digits}"
         
         # Check if already exists in active transactions
         dup = False
@@ -255,51 +255,105 @@ def get_user_quota_info(user_id: int) -> dict:
         "quota_str": quota_str
     }
 
-async def verify_payment_on_sepay(order_id: str, expected_amount: float) -> bool:
-    """Gọi SePay API để xác nhận xem người dùng đã thanh toán đơn hàng này chưa."""
+async def fetch_sepay_transactions() -> list:
+    """Lấy danh sách giao dịch tiền vào gần nhất từ SePay (thử lần lượt các endpoint)."""
     api_key = config.SEPAY_API_KEY
     if not api_key:
-        log("SEPAY_API_KEY chưa được cấu hình, không thể xác thực thanh toán", "error")
-        return False
+        return []
 
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-
     endpoints = [
         "https://userapi.sepay.vn/v2/transactions?limit=50",
         "https://my.sepay.vn/userapi/transactions/list?limit=50"
     ]
-
-    log(f"Đang kết nối SePay API để đối soát đơn hàng: {order_id} (Số tiền mong đợi: {expected_amount:,} VNĐ)...", "info")
-    
     for url in endpoints:
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, timeout=10) as r:
-                    log(f"Kết quả gọi SePay ({url.split('?')[0]}) - Status: {r.status}", "info")
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     if r.status == 200:
                         data = await r.json()
                         tx_list = data.get("data") if isinstance(data.get("data"), list) else data.get("transactions", [])
-                        for tx in tx_list:
-                            content = tx.get("transaction_content", "") or ""
-                            amount_val = tx.get("amount_in", 0)
-                            try:
-                                amount = float(amount_val)
-                            except (ValueError, TypeError):
-                                amount = 0.0
-                            
-                            # Match order_id (case-insensitive) and verify expected amount
-                            if order_id.lower() in content.lower() and amount >= expected_amount:
-                                log(f"Xác thực thanh toán thành công cho đơn hàng: {order_id} - Số tiền nhận: {amount:,.0f} VNĐ", "ok")
-                                return True
+                        return tx_list or []
+                    log(f"SePay ({url.split('?')[0]}) trả về status {r.status}", "warn")
         except Exception as e:
             log(f"Lỗi khi kiểm tra SePay endpoint {url}: {e}", "warn")
-            continue
+    return []
 
-    log(f"Đối soát giao dịch {order_id} thất bại (chưa tìm thấy chuyển khoản khớp)", "warn")
+def match_payment(tx_list: list, order_id: str, expected_amount: float) -> bool:
+    """Kiểm tra danh sách giao dịch có khoản khớp nội dung + đủ số tiền không."""
+    for tx in tx_list:
+        content = tx.get("transaction_content", "") or tx.get("content", "") or ""
+        try:
+            amount = float(tx.get("amount_in", 0) or 0)
+        except (ValueError, TypeError):
+            amount = 0.0
+        if order_id.lower() in content.lower() and amount >= expected_amount:
+            return True
     return False
+
+async def verify_payment_on_sepay(order_id: str, expected_amount: float) -> bool:
+    """Gọi SePay API để xác nhận xem người dùng đã thanh toán đơn hàng này chưa."""
+    if not config.SEPAY_API_KEY:
+        log("SEPAY_API_KEY chưa được cấu hình, không thể xác thực thanh toán", "error")
+        return False
+    tx_list = await fetch_sepay_transactions()
+    if match_payment(tx_list, order_id, expected_amount):
+        log(f"Xác thực thanh toán thành công cho đơn hàng: {order_id}", "ok")
+        return True
+    return False
+
+def get_pending_transactions() -> list:
+    """Danh sách (user_id, tx) của mọi đơn còn hiệu lực đang chờ thanh toán."""
+    limits = load_limits()
+    now = int(time.time())
+    timeout = limits.get("transaction_timeout", 300)
+    pending = []
+    for uid, data in limits.items():
+        if isinstance(data, dict) and data.get("active_transaction"):
+            tx = data["active_transaction"]
+            if now - tx.get("created_at", 0) <= timeout:
+                pending.append((int(uid), tx))
+    return pending
+
+def complete_transaction(user_id: int, order_id: str) -> Optional[dict]:
+    """Hoàn tất đơn (cộng lượt) đúng 1 lần. Trả về tx nếu thành công, None nếu đơn đã được xử lý/không tồn tại."""
+    uid = str(user_id)
+    limits = load_limits()
+    user_data = limits.get(uid)
+    if not isinstance(user_data, dict):
+        return None
+    tx = user_data.get("active_transaction")
+    if not tx or tx.get("order_id") != order_id:
+        return None
+    user_data["purchased_balance"] = user_data.get("purchased_balance", 0) + tx["quests_to_buy"]
+    user_data["active_transaction"] = None
+    payments = user_data.setdefault("payments", [])
+    payments.append({
+        "order_id": order_id,
+        "amount": tx["amount"],
+        "quests": tx["quests_to_buy"],
+        "paid_at": int(time.time())
+    })
+    del payments[:-20]
+    save_limits(limits)
+    log(f"Cộng {tx['quests_to_buy']} lượt cho {user_id} (đơn {order_id}). Số dư: {user_data['purchased_balance']}", "ok")
+    return tx
+
+def get_payment_history(user_id: int) -> list:
+    limits = load_limits()
+    data = limits.get(str(user_id))
+    return list(data.get("payments", [])) if isinstance(data, dict) else []
+
+def get_leaderboard(top: int = 10) -> list:
+    """Top người dùng theo tổng quest hoàn thành: [(user_id, total)]."""
+    limits = load_limits()
+    rows = [(int(uid), d.get("total_completed", 0)) for uid, d in limits.items()
+            if isinstance(d, dict) and uid.isdigit() and d.get("total_completed", 0) > 0]
+    rows.sort(key=lambda r: r[1], reverse=True)
+    return rows[:top]
 
 def save_global_stats():
     """Lưu thống kê toàn cục hiện tại vào file limits."""

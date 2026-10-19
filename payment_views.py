@@ -6,12 +6,92 @@ from limits_manager import (
     get_active_transaction,
     create_transaction,
     cancel_transaction,
-    add_purchased_balance,
-    verify_payment_on_sepay,
+    fetch_sepay_transactions,
+    match_payment,
+    get_pending_transactions,
+    complete_transaction,
     get_price_per_quest,
     get_transaction_timeout,
     get_user_quota_info
 )
+
+
+# order_id -> interaction đang hiển thị hóa đơn (để tự cập nhật tin nhắn khi thanh toán xong)
+LIVE_INVOICES = {}
+AUTO_CHECK_INTERVAL = 6
+
+
+def register_invoice(interaction: discord.Interaction, view):
+    """Gắn interaction đang hiển thị hóa đơn để tự cập nhật khi tiền về."""
+    if isinstance(view, QuestPaymentConfirmView):
+        LIVE_INVOICES[view.order_id] = interaction
+
+
+def build_success_embed(tx: dict, user_id: int, auto: bool) -> discord.Embed:
+    quota_info = get_user_quota_info(user_id)
+    embed = discord.Embed(
+        title="🎉 THANH TOÁN THÀNH CÔNG!",
+        color=discord.Color.from_rgb(87, 242, 135),
+        description=(
+            f"### {config.EMOJI_SUCCESS} Hệ Thống Đã Nhận Được Tiền!\n"
+            f"{'⚡ Hệ thống đã **tự động phát hiện** chuyển khoản của bạn.' if auto else 'Đã xác thực giao dịch chuyển khoản thành công từ ngân hàng.'}\n\n"
+            f"• 📝 **Mã đơn hàng:** `{tx['order_id']}`\n"
+            f"• 💰 **Số tiền đã nhận:** `{tx['amount']:,} VNĐ`\n"
+            f"• 📦 **Lượt quest được cộng:** `+{tx['quests_to_buy']} lượt`\n"
+            f"• 💎 **Số dư khả dụng hiện tại:** **{quota_info['quota_str']}**\n\n"
+            f"🚀 Dùng `/details` để theo dõi tiến độ hoặc `/history` để xem lịch sử nạp."
+        )
+    )
+    embed.set_footer(text="⏱️ Tin nhắn này sẽ tự động đóng sau 10 giây • Cảm ơn quý khách")
+    embed.timestamp = discord.utils.utcnow()
+    return embed
+
+
+def _schedule_delete(interaction: discord.Interaction, delay: int = 10):
+    async def task():
+        await asyncio.sleep(delay)
+        try:
+            await interaction.delete_original_response()
+        except Exception:
+            pass
+    asyncio.create_task(task())
+
+
+async def payment_watcher(bot):
+    """Vòng lặp nền: tự đối soát SePay cho mọi đơn đang chờ và cộng lượt ngay khi tiền về."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            pending = get_pending_transactions()
+            if pending and config.SEPAY_API_KEY:
+                tx_list = await fetch_sepay_transactions()
+                for user_id, tx in pending:
+                    if not match_payment(tx_list, tx["order_id"], tx["amount"]):
+                        continue
+                    done = complete_transaction(user_id, tx["order_id"])
+                    if not done:
+                        continue
+                    embed = build_success_embed(done, user_id, auto=True)
+                    inter = LIVE_INVOICES.pop(done["order_id"], None)
+                    edited = False
+                    if inter:
+                        try:
+                            await inter.edit_original_response(embed=embed, view=None)
+                            _schedule_delete(inter)
+                            edited = True
+                        except Exception:
+                            pass
+                    if not edited:
+                        try:
+                            user = bot.get_user(user_id) or await bot.fetch_user(user_id)
+                            await user.send(embed=embed)
+                        except Exception:
+                            pass
+        except Exception as e:
+            from logger import log
+            log(f"Lỗi payment_watcher: {e}", "warn")
+        await asyncio.sleep(AUTO_CHECK_INTERVAL)
+
 
 class QuestPurchaseDropdown(discord.ui.Select):
     def __init__(self, user_id):
@@ -71,6 +151,7 @@ class QuestPurchaseDropdown(discord.ui.Select):
 
         # Cập nhật giao diện hóa đơn kèm VietQR
         embed, view = get_limit_embed_and_view(self.user_id)
+        LIVE_INVOICES[order_id] = interaction
         await interaction.edit_original_response(embed=embed, view=view)
 
 
@@ -88,7 +169,7 @@ class QuestPaymentConfirmView(discord.ui.View):
         self.amount = amount
         self.quantity = quantity
 
-    @discord.ui.button(label="Xác Nhận Chuyển Khoản", style=discord.ButtonStyle.success, emoji="✅")
+    @discord.ui.button(label="Kiểm Tra Ngay", style=discord.ButtonStyle.success, emoji="✅")
     async def confirm_payment(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ Nút bấm này không dành cho bạn.", ephemeral=True)
@@ -109,57 +190,26 @@ class QuestPaymentConfirmView(discord.ui.View):
             )
             return
 
-        # Defer tương tác nút để tránh timeout Discord trong lúc truy vấn SePay
         await interaction.response.defer()
-        
-        # Gọi SePay kiểm tra chuyển khoản
-        is_paid = await verify_payment_on_sepay(self.order_id, self.amount)
-        if is_paid:
-            # Cộng lượt vào tài khoản
-            add_purchased_balance(self.user_id, self.quantity)
-            quota_info = get_user_quota_info(self.user_id)
-            
-            # Embed thông báo thành công xịn sò
-            embed = discord.Embed(
-                title="🎉 THANH TOÁN THÀNH CÔNG!",
-                color=discord.Color.from_rgb(87, 242, 135),
-                description=(
-                    f"### {config.EMOJI_SUCCESS} Hệ Thống Đã Nhận Được Tiền!\n"
-                    f"Đã xác thực giao dịch chuyển khoản thành công từ ngân hàng.\n\n"
-                    f"• 📝 **Mã đơn hàng:** `{self.order_id}`\n"
-                    f"• 💰 **Số tiền đã nhận:** `{self.amount:,} VNĐ`\n"
-                    f"• 📦 **Lượt quest được cộng:** `+{self.quantity} lượt`\n"
-                    f"• 💎 **Số dư khả dụng hiện tại:** **{quota_info['quota_str']}**\n\n"
-                    f"⚡ **Tiến trình làm quest của bạn đã được kích hoạt chạy tiếp tự động!**"
-                )
-            )
-            embed.set_footer(text="⏱️ Tin nhắn này sẽ tự động đóng sau 10 giây • Cảm ơn quý khách")
-            embed.timestamp = discord.utils.utcnow()
+        LIVE_INVOICES[self.order_id] = interaction
 
-            # Chỉnh sửa tin nhắn hiện tại sang embed thành công và gỡ toàn bộ nút
-            await interaction.edit_original_response(embed=embed, view=None)
+        tx_list = await fetch_sepay_transactions()
+        if match_payment(tx_list, self.order_id, self.amount):
+            done = complete_transaction(self.user_id, self.order_id)
+            if done:
+                LIVE_INVOICES.pop(self.order_id, None)
+                await interaction.edit_original_response(embed=build_success_embed(done, self.user_id, auto=False), view=None)
+                _schedule_delete(interaction)
+                return
+            # Đơn đã được vòng quét tự động xử lý trước đó
+            return
 
-            # Tự động xóa tin nhắn sau 10 giây theo yêu cầu
-            async def auto_delete_task():
-                await asyncio.sleep(10)
-                try:
-                    await interaction.delete_original_response()
-                except Exception:
-                    try:
-                        if interaction.message:
-                            await interaction.message.delete()
-                    except Exception:
-                        pass
-
-            asyncio.create_task(auto_delete_task())
-
-        else:
-            await interaction.followup.send(
-                f"❌ **Chưa nhận được thanh toán!**\n"
-                f"Hệ thống SePay chưa quét thấy giao dịch chuyển khoản có nội dung: `{self.order_id}` (Số tiền: **{self.amount:,}đ**).\n\n"
-                f"💡 **Mẹo:** Nếu bạn vừa chuyển khoản thành công qua App ngân hàng, hệ thống có thể cần từ 30s đến 1 phút để đồng bộ. Vui lòng đợi một lát rồi bấm lại nút **Xác Nhận Chuyển Khoản**.",
-                ephemeral=True
-            )
+        await interaction.followup.send(
+            f"⏳ **Chưa thấy tiền về.**\n"
+            f"Chưa quét thấy giao dịch nội dung `{self.order_id}` (**{self.amount:,}đ**).\n"
+            f"💡 Không cần bấm lại — hệ thống **tự động kiểm tra mỗi {AUTO_CHECK_INTERVAL}s** và sẽ cộng lượt ngay khi tiền về.",
+            ephemeral=True
+        )
 
     @discord.ui.button(label="Hủy Giao Dịch", style=discord.ButtonStyle.danger, emoji="❌")
     async def cancel_payment(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -168,6 +218,7 @@ class QuestPaymentConfirmView(discord.ui.View):
             return
 
         cancel_transaction(self.user_id)
+        LIVE_INVOICES.pop(self.order_id, None)
         
         # Quay về màn hình chọn số lượng mua
         embed, view = get_limit_embed_and_view(self.user_id)
@@ -210,7 +261,7 @@ def get_limit_embed_and_view(user_id: int):
                 f"App ngân hàng sẽ tự động điền đúng số tài khoản, số tiền và nội dung chuyển khoản.\n\n"
                 f"⏳ **Thời hạn thanh toán:** {time_limit_str}\n\n"
                 f"⚠️ **LƯU Ý QUAN TRỌNG:**\n"
-                f"Hệ thống kiểm tra tự động 24/7 qua SePay. Bạn bắt buộc phải ghi **chính xác nội dung** `{order_id}` để được cộng lượt tự động ngay tức thì."
+                f"Hệ thống **tự động phát hiện** chuyển khoản qua SePay 24/7 và cộng lượt ngay, không cần bấm gì. Hãy ghi **chính xác nội dung** `{order_id}`."
             )
         )
         embed.add_field(name="🏦 Ngân Hàng", value=f"**{config.BANK_ID}** (Quân Đội)", inline=True)
@@ -226,7 +277,7 @@ def get_limit_embed_and_view(user_id: int):
         )
         
         embed.set_image(url=qr_url)
-        embed.set_footer(text=f"Sau khi chuyển tiền xong, vui lòng nhấn nút 'Xác Nhận Chuyển Khoản' bên dưới.")
+        embed.set_footer(text="🔄 Tự động kiểm tra mỗi 6 giây — chuyển khoản xong chỉ cần đợi, hoặc bấm 'Kiểm Tra Ngay'.")
         
         view = QuestPaymentConfirmView(user_id, order_id, amount, quantity)
         return embed, view
