@@ -274,16 +274,16 @@ def get_user_quota_info(user_id: int) -> dict:
     if is_admin and getattr(config, 'ADMIN_BYPASS_LIMIT', True):
         quota_str = "👑 Vô hạn (Admin)"
         if purchased > 0:
-            quota_str += f" • {purchased} lượt mua dự trữ"
+            quota_str += f" • {purchased:02d} lượt mua dự trữ"
     else:
         if purchased > 0:
-            quota_str = f"{purchased} lượt mua"
+            quota_str = f"{purchased:02d} lượt mua"
             if free_available > 0:
-                quota_str += " + 1 lượt free hôm nay"
+                quota_str += " + 01 lượt free hôm nay"
         elif free_available > 0:
-            quota_str = "1 lượt free hôm nay"
+            quota_str = "01 lượt free hôm nay"
         else:
-            quota_str = "0 lượt (Hết lượt free hôm nay)"
+            quota_str = "00 lượt (Hết lượt free hôm nay)"
 
     return {
         "is_admin": is_admin,

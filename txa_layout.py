@@ -214,7 +214,7 @@ def _settings():
                 {
                     "key": "timeout", "emoji": "⏳", "label": "Hạn hóa đơn QR",
                     "desc": "Sau thời gian này hóa đơn chưa thanh toán sẽ hết hạn.",
-                    "values": [("3", "3 phút", "Ngắn • tránh treo đơn"), ("5", "5 phút", "Mặc định • khuyên dùng"),
+                    "values": [("3", "03 phút", "Ngắn • tránh treo đơn"), ("5", "05 phút", "Mặc định • khuyên dùng"),
                                ("10", "10 phút", "Thoải mái cho người chuyển chậm"), ("15", "15 phút", "Dài"),
                                ("30", "30 phút", "Rất dài • giữ đơn lâu")],
                     "custom": {"min": 1, "max": 120, "unit": "phút"},
@@ -363,10 +363,10 @@ class ConfigLayoutView(TxaView):
             f"👑 Admin IDs: `{', '.join(map(str, config.ADMIN_IDS))}`\n"
             f"🔑 SePay: {'Đã cấu hình ✅' if config.SEPAY_API_KEY else 'Chưa cấu hình ❌'}\n\n"
             f"**⚙️ Hệ thống**\n"
-            f"🔄 Quét quest: `{config.POLL_INTERVAL}s` • 💓 Heartbeat: `{config.HEARTBEAT_INTERVAL}s`\n"
+            f"🔄 Quét quest: `{config.POLL_INTERVAL:02d}s` • 💓 Heartbeat: `{config.HEARTBEAT_INTERVAL:02d}s`\n"
             f"📥 Tự nhận quest: {on(config.AUTO_ACCEPT)} • 📝 Log: {on(config.LOG_PROGRESS)} • 🐞 Debug: {on(config.DEBUG)}\n\n"
             f"**💰 Quest & Thanh toán**\n"
-            f"💵 Đơn giá: `{get_price_per_quest():,} VNĐ`/lượt • ⏳ Hạn QR: `{timeout // 60} phút`\n"
+            f"💵 Đơn giá: `{get_price_per_quest():,} VNĐ`/lượt • ⏳ Hạn QR: `{timeout // 60:02d} phút`\n"
             f"👑 Admin vô hạn lượt: {on(getattr(config, 'ADMIN_BYPASS_LIMIT', True))}"
         )
 
@@ -490,8 +490,8 @@ class StatusLayoutView(TxaView):
         items = [
             "### 📡 Bảng Điều Khiển Admin",
             self.note,
-            f"{'🟢' if count else '⚪'} **{count}** phiên đang chạy\n"
-            f"✅ **{done}** thành công  •  ❌ **{failed}** thất bại  •  🧾 **{pending}** đơn chờ thanh toán",
+            f"{'🟢' if count else '⚪'} **{count:02d}** phiên đang chạy\n"
+            f"✅ **{done:02d}** thành công  •  ❌ **{failed:02d}** thất bại  •  🧾 **{pending:02d}** đơn chờ thanh toán",
             "---",
         ]
         if not users:
@@ -502,16 +502,16 @@ class StatusLayoutView(TxaView):
                 curr = getattr(completer, "current_quest_info", None) if completer else None
                 if curr:
                     d, n = curr.get("done", 0), curr.get("needed", 1)
-                    body = f"🎯 **{curr.get('name', 'Quest')}**\n`{get_progress_bar(d, n)}`  ⏳ `{d:.0f}s/{n}s`"
+                    body = f"🎯 **{curr.get('name', 'Quest')}**\n`{get_progress_bar(d, n)}`  ⏳ `{int(d):02d}s/{int(n):02d}s`"
                 else:
                     body = "🔍 *Đang quét / chờ nhiệm vụ...*"
                 run_s = int(time.time() - info.get("start_timestamp", time.time()))
                 items.append(
                     f"**🟢 {info.get('username')}** • <@{uid}>\n{body}\n"
-                    f"🕒 Bắt đầu <t:{info.get('start_timestamp', 0)}:R> • đã chạy `{run_s // 3600}h {run_s % 3600 // 60}m`"
+                    f"🕒 Bắt đầu <t:{info.get('start_timestamp', 0)}:R> • đã chạy `{run_s // 3600:02d}h {run_s % 3600 // 60:02d}m`"
                 )
             if count > 5:
-                items.append(f"-# … và {count - 5} phiên khác")
+                items.append(f"-# … và {count - 5:02d} phiên khác")
             items.append("---")
             row = discord.ui.ActionRow()
             row.add_item(StopSessionSelect(self, self.bot))
@@ -521,10 +521,10 @@ class StatusLayoutView(TxaView):
         timeout = get_transaction_timeout()
         items += [
             "---",
-            f"**💳 Thanh toán** • `{get_price_per_quest():,}đ`/lượt • hạn QR `{timeout // 60}p` • SePay {'✅' if config.SEPAY_API_KEY else '❌'}\n"
-            f"**⚙️ Vận hành** • quét `{config.POLL_INTERVAL}s` • heartbeat `{config.HEARTBEAT_INTERVAL}s` • "
+            f"**💳 Thanh toán** • `{get_price_per_quest():,}đ`/lượt • hạn QR `{timeout // 60:02d}p` • SePay {'✅' if config.SEPAY_API_KEY else '❌'}\n"
+            f"**⚙️ Vận hành** • quét `{config.POLL_INTERVAL:02d}s` • heartbeat `{config.HEARTBEAT_INTERVAL:02d}s` • "
             f"tự nhận {on(config.AUTO_ACCEPT)} • Admin bypass {on(getattr(config, 'ADMIN_BYPASS_LIMIT', True))}\n"
-            f"**🤖 Bot** • ping `{round(self.bot.latency * 1000)} ms` • uptime `{uptime // 3600}h {uptime % 3600 // 60}m` • RAM `{get_process_memory()} MB`",
+            f"**🤖 Bot** • ping `{round(self.bot.latency * 1000)} ms` • uptime `{uptime // 3600:02d}h {uptime % 3600 // 60:02d}m` • RAM `{get_process_memory()} MB`",
         ]
         self.add_item(box(*items, accent=GREEN if count else ACCENT))
 
@@ -576,7 +576,7 @@ class SystemLayoutView(TxaView):
         days, rem = divmod(up, 86400)
         hours, rem = divmod(rem, 3600)
         mins, secs = divmod(rem, 60)
-        uptime_str = (f"{days}d " if days else "") + f"{hours:02d}:{mins:02d}:{secs:02d}"
+        uptime_str = (f"{days:02d}d " if days else "") + f"{hours:02d}:{mins:02d}:{secs:02d}"
 
         cpu, ram, disk = get_cpu_info(), get_ram_info(), get_disk_info()
         latency = round(self.bot.latency * 1000) if self.bot.latency is not None else 0
@@ -585,7 +585,7 @@ class SystemLayoutView(TxaView):
         accent = GREEN if worst < 60 else YELLOW if worst < 85 else RED
         ping_icon = "🟢" if latency < 150 else "🟡" if latency < 400 else "🔴"
 
-        status = "🔴 **LIVE** • tự cập nhật mỗi 3 giây" if self.live else "⏸️ Đã tạm dừng cập nhật"
+        status = "🔴 **LIVE** • tự cập nhật mỗi 03 giây" if self.live else "⏸️ Đã tạm dừng cập nhật"
         self.add_item(box(
             "### ⚡ System Monitor",
             f"{status}\n🕒 Online từ <t:{int(self.bot_start_time)}:R> • Uptime **{uptime_str}**",
@@ -593,10 +593,10 @@ class SystemLayoutView(TxaView):
             f"RAM   {ram['percent']:>5.1f}%  {slider_bar(ram['percent'])}\n"
             f"DISK  {disk['percent']:>5.1f}%  {slider_bar(disk['percent'])}\n```",
             "---",
-            f"{load_icon(cpu['percent'])} **CPU** • {cpu['cores']} nhân • `{str(cpu['model'])[:40]}`\n"
+            f"{load_icon(cpu['percent'])} **CPU** • {cpu['cores']:02d} nhân • `{str(cpu['model'])[:40]}`\n"
             f"{load_icon(ram['percent'])} **RAM** • {ram['used_gb']}/{ram['total_gb']} GB • Bot dùng `{get_process_memory()} MB`\n"
             f"{load_icon(disk['percent'])} **Ổ đĩa** • {disk['used_gb']}/{disk['total_gb']} GB",
-            f"{ping_icon} **Ping** `{latency} ms` • 👥 **Phiên** `{get_active_sessions_count()}` • 🎯 **Quest** ✅ `{ok}` ❌ `{bad}`",
+            f"{ping_icon} **Ping** `{latency} ms` • 👥 **Phiên** `{get_active_sessions_count():02d}` • 🎯 **Quest** ✅ `{ok:02d}` ❌ `{bad:02d}`",
             f"-# {get_os_info()} • Python {platform.python_version()} • discord.py {discord.__version__} • cập nhật {time.strftime('%H:%M:%S')}",
             accent=accent,
         ))
@@ -650,7 +650,7 @@ def _history_content(user_id: int, limit: int = 10):
     rows = get_payment_history(user_id)
     if not rows:
         return "🧾 Lịch Sử Nạp Lượt", "Bạn chưa có giao dịch nào. Dùng `/buy` để mua lượt đầu tiên!"
-    lines = [f"`{r['order_id']}` • **{r['amount']:,}đ** • +{r['quests']} lượt • <t:{r['paid_at']}:R>" for r in reversed(rows[-limit:])]
+    lines = [f"`{r['order_id']}` • **{r['amount']:,}đ** • +{r['quests']:02d} lượt • <t:{r['paid_at']}:R>" for r in reversed(rows[-limit:])]
     return "🧾 Lịch Sử Nạp Lượt", "\n".join(lines) + f"\n\n💰 Tổng đã nạp: **{sum(r['amount'] for r in rows):,} VNĐ**"
 
 
@@ -660,14 +660,14 @@ def _leaderboard_content():
     medals = ["🥇", "🥈", "🥉"]
     if not rows:
         return "🏆 Bảng Xếp Hạng Quest", "Chưa có ai hoàn thành quest."
-    body = "\n".join(f"{medals[i] if i < 3 else f'`#{i + 1}`'} <@{u}> — **{t}** quest" for i, (u, t) in enumerate(rows))
-    return "🏆 Bảng Xếp Hạng Quest", body + f"\n\n🎯 Tổng toàn hệ thống: **{config.TOTAL_COMPLETED}** quest"
+    body = "\n".join(f"{medals[i] if i < 3 else f'`#{i + 1:02d}`'} <@{u}> — **{t:02d}** quest" for i, (u, t) in enumerate(rows))
+    return "🏆 Bảng Xếp Hạng Quest", body + f"\n\n🎯 Tổng toàn hệ thống: **{config.TOTAL_COMPLETED:02d}** quest"
 
 
 def _quota_content(user_id: int):
     from limits_manager import get_user_quota_info
     info = get_user_quota_info(user_id)
-    return "💰 Số Dư Của Bạn", f"💎 Lượt khả dụng: **{info['quota_str']}**\n🏆 Đã hoàn thành: `{info['total_completed']} nhiệm vụ`"
+    return "💰 Số Dư Của Bạn", f"💎 Lượt khả dụng: **{info['quota_str']}**\n🏆 Đã hoàn thành: `{info['total_completed']:02d} nhiệm vụ`"
 
 
 def history_view(user_id, back=None, limit: int = 10):
@@ -687,7 +687,7 @@ def quota_view(user_id, back=None):
 def ping_view(user_id, bot, back=None):
     def content():
         ms = round(bot.latency * 1000)
-        return "🏓 Pong!", f"Độ trễ gateway: **{ms} ms**\nPhiên đang chạy: **{len(config.ACTIVE_USERS)}**"
+        return "🏓 Pong!", f"Độ trễ gateway: **{ms} ms**\nPhiên đang chạy: **{len(config.ACTIVE_USERS):02d}**"
     ms = round(bot.latency * 1000)
     accent = GREEN if ms < 150 else ORANGE if ms < 400 else RED
     return SimpleLayoutView(user_id, *content(), accent=accent, back=back, refresh=content)
@@ -775,11 +775,11 @@ class HelpLayoutView(TxaView):
             items = [
                 "### 📖 Trung Tâm Trợ Giúp • Quest Bot",
                 "Tự động quét • nhận • hoàn thành Discord Quest.",
-                "\n".join(f"{g[1]} **{g[0]}** • {len(g[3])} lệnh\n-# {g[2]}" for g in groups.values()),
+                "\n".join(f"{g[1]} **{g[0]}** • {len(g[3]):02d} lệnh\n-# {g[2]}" for g in groups.values()),
                 "---",
                 "**Chọn nhóm lệnh**",
                 row,
-                f"-# Tổng cộng {total} lệnh • Quest Bot v4.0 • Built by TXA",
+                f"-# Tổng cộng {total:02d} lệnh • Quest Bot v4.0 • Built by TXA",
             ]
         else:
             label, emoji, desc, names = groups[self.group]
@@ -861,7 +861,7 @@ class ExtensionGuideView(TxaView):
         items = [
             "### 📦 Cài Tiện Ích Lấy Token",
             "**TXA Discord Token Retriever** — lấy token nhanh chỉ với một cú bấm.\n"
-            "Trình duyệt không cài trực tiếp được file `.crx`, nên hãy cài thủ công theo 6 bước dưới đây (khoảng 1 phút).",
+            "Trình duyệt không cài trực tiếp được file `.crx`, nên hãy cài thủ công theo 06 bước dưới đây (khoảng 01 phút).",
             "---",
             steps,
         ]
@@ -899,7 +899,7 @@ def build_tree():
             "label": "Mua lượt Quest", "emoji": "💎", "desc": "Nạp lượt làm quest bằng VietQR",
             "children": {
                 str(n): {
-                    "label": f"{n} lượt - {info['final']:,}đ",
+                    "label": f"{n:02d} lượt - {info['final']:,}đ",
                     "emoji": PACKAGE_EMOJI.get(n, "💎"),
                     "desc": (f"Giảm {info['pct']}% • tiết kiệm {info['saved']:,}đ" if info["pct"] else "Mua lẻ, không giảm giá"),
                     "children": {"qr": {"label": "Thanh toán VietQR", "emoji": "🏦", "desc": "Quét mã, tự động cộng lượt"}},
@@ -914,7 +914,7 @@ def build_tree():
                 "history": {
                     "label": "Lịch sử nạp", "emoji": "🧾", "desc": "Các giao dịch gần đây",
                     "children": {
-                        "5": {"label": "5 giao dịch gần nhất", "emoji": "5️⃣", "desc": "Gọn, xem nhanh"},
+                        "5": {"label": "05 giao dịch gần nhất", "emoji": "5️⃣", "desc": "Gọn, xem nhanh"},
                         "10": {"label": "10 giao dịch gần nhất", "emoji": "🔟", "desc": "Đầy đủ hơn"},
                     },
                 },
@@ -1033,7 +1033,7 @@ class MenuLayoutView(TxaView):
             "1️⃣ Lấy token bằng tiện ích của TXA.\n"
             "2️⃣ Bấm 🚀 **Bắt Đầu** ở kênh bot và dán token.\n"
             "3️⃣ Bot tự **quét • nhận • hoàn thành** quest và báo tiến độ qua DM.\n"
-            "4️⃣ Mỗi ngày có 1 lượt free, mua thêm tại `/menu` hoặc `/buy`.",
+            "4️⃣ Mỗi ngày có 01 lượt free, mua thêm tại `/menu` hoặc `/buy`.",
             back=me,
         )
         await self.go(interaction, view)

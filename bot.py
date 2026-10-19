@@ -314,7 +314,7 @@ async def notify_admins_session_started(bot, user_id, discord_user, quest_userna
             f"• **Trạng thái:** `🚀 Đang khởi động kết nối...`\n"
             f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
             f"• **Tiến độ tổng:** `▱▱▱▱▱▱▱▱▱▱` **0%**\n"
-            f"• **Phiên đồng thời:** `{len(config.ACTIVE_USERS)} phiên đang chạy`"
+            f"• **Phiên đồng thời:** `{len(config.ACTIVE_USERS):02d} phiên đang chạy`"
         ),
         inline=False
     )
@@ -379,9 +379,10 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
         # Kiểm tra giới hạn lượt quest trước khi tiếp tục
         from limits_manager import is_user_limited
         if is_user_limited(user_id):
-            from payment_views import get_limit_embed_and_view
+            from payment_views import get_limit_embed_and_view, register_invoice
             embed, view = get_limit_embed_and_view(user_id)
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            register_invoice(interaction, view)
             return
 
         # Validate token
@@ -598,8 +599,8 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                         value=(
                             f"• **Trạng thái:** `🟢 Hoàn thành 100%`\n"
                             f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
-                            f"• **Số quest hoàn tất:** `✅ {completed_count}/{total_count} nhiệm vụ`\n"
-                            f"• **Tổng quest tích lũy:** `🏆 {user_total} nhiệm vụ`"
+                            f"• **Số quest hoàn tất:** `✅ {completed_count:02d}/{total_count:02d} nhiệm vụ`\n"
+                            f"• **Tổng quest tích lũy:** `🏆 {user_total:02d} nhiệm vụ`"
                         ),
                         inline=False
                     )
@@ -649,9 +650,9 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                     value=(
                         f"• **Trạng thái:** `{status_badge}`\n"
                         f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
-                        f"• **Tiến độ phiên:** `{overall_bar}` **{overall_ratio:.0f}%** ({completed_count}/{total_count} xong)\n"
+                        f"• **Tiến độ phiên:** `{overall_bar}` **{overall_ratio:.0f}%** ({completed_count:02d}/{total_count:02d} xong)\n"
                         f"• **Lượt quest khả dụng:** `💎 {quota_info['quota_str']}`\n"
-                        f"• **Tổng quest tích lũy:** `🏆 {user_total} nhiệm vụ`"
+                        f"• **Tổng quest tích lũy:** `🏆 {user_total:02d} nhiệm vụ`"
                     ),
                     inline=False
                 )
@@ -683,14 +684,14 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                     pct = (done / needed * 100) if needed > 0 else 0
                     quest_bar = make_bar(pct, length=10)
                     remaining = max(0, int(needed - done))
-                    eta_text = f"{remaining // 60}p {remaining % 60}s" if remaining >= 60 else f"{remaining}s"
+                    eta_text = f"{remaining // 60:02d}p {remaining % 60:02d}s" if remaining >= 60 else f"{remaining:02d}s"
 
                     embed_edit.add_field(
                         name="⚡ Nhiệm Vụ Đang Xử Lý",
                         value=(
                             f"• **Nhiệm vụ:** **{active_name}**\n"
                             f"• **Loại hình:** `{task_label}`\n"
-                            f"• **Tiến độ:** `{quest_bar}` **{pct:.0f}%** (`{done:.0f}s / {needed}s`)\n"
+                            f"• **Tiến độ:** `{quest_bar}` **{pct:.0f}%** (`{int(done):02d}s / {int(needed):02d}s`)\n"
                             f"• **Thời gian còn lại:** `⏳ ~{eta_text}`"
                         ),
                         inline=False
@@ -719,7 +720,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                             quest_lines.append(f"⚪ {q_name} `[{q_task}]` *(Chưa nhận)*")
 
                     embed_edit.add_field(
-                        name=f"📋 Danh Sách Nhiệm Vụ ({completed_count}/{total_count})",
+                        name=f"📋 Danh Sách Nhiệm Vụ ({completed_count:02d}/{total_count:02d})",
                         value="\n".join(quest_lines[:12]),
                         inline=False
                     )
@@ -757,8 +758,8 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
                     value=(
                         f"• **Trạng thái:** `{status_badge}`\n"
                         f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
-                        f"• **Tiến độ tổng:** `{overall_bar}` **{overall_ratio:.0f}%** ({completed_count}/{total_count} xong)\n"
-                        f"• **Phiên đồng thời:** `{len(config.ACTIVE_USERS)} phiên đang chạy`"
+                        f"• **Tiến độ tổng:** `{overall_bar}` **{overall_ratio:.0f}%** ({completed_count:02d}/{total_count:02d} xong)\n"
+                        f"• **Phiên đồng thời:** `{len(config.ACTIVE_USERS):02d} phiên đang chạy`"
                     ),
                     inline=False
                 )
@@ -777,7 +778,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
 
                 if quests:
                     admin_embed.add_field(
-                        name=f"📋 Danh Sách Nhiệm Vụ ({completed_count}/{total_count})",
+                        name=f"📋 Danh Sách Nhiệm Vụ ({completed_count:02d}/{total_count:02d})",
                         value="\n".join(quest_lines[:8]),
                         inline=False
                     )
@@ -989,14 +990,14 @@ async def build_session_details_response(user_id: int, discord_user: discord.Use
         if quota['is_admin'] and getattr(config, "ADMIN_BYPASS_LIMIT", True):
             free_status = "♾️ Vô hạn (Admin không bị trừ lượt)"
         else:
-            free_status = "✅ Còn 1 lượt (Làm miễn phí ngay hôm nay)" if quota['free_available'] else "❌ Đã dùng hết hôm nay (Hệ thống reset lúc 00:00)"
+            free_status = "✅ Còn 01 lượt (Làm miễn phí ngay hôm nay)" if quota['free_available'] else "❌ Đã dùng hết hôm nay (Hệ thống reset lúc 00:00)"
         embed.add_field(
             name="💎 Hạn Mức & Số Dư Làm Quest",
             value=(
                 f"• **Lượt khả dụng:** `💎 {quota['quota_str']}`\n"
                 f"• **Lượt miễn phí hôm nay:** `{free_status}`\n"
-                f"• **Lượt mua trả phí dự trữ:** `{quota['purchased_balance']} lượt`\n"
-                f"• **Tổng quest đã hoàn thành:** `🏆 {user_total} nhiệm vụ`"
+                f"• **Lượt mua trả phí dự trữ:** `{quota['purchased_balance']:02d} lượt`\n"
+                f"• **Tổng quest đã hoàn thành:** `🏆 {user_total:02d} nhiệm vụ`"
             ),
             inline=False
         )
@@ -1057,9 +1058,9 @@ async def build_session_details_response(user_id: int, discord_user: discord.Use
         value=(
             f"• **Trạng thái:** `{status_badge}`\n"
             f"• **Bắt đầu lúc:** <t:{start_ts}:R> *(lúc <t:{start_ts}:T>)*\n"
-            f"• **Tiến độ hoàn tất:** `{overall_bar}` **{overall_ratio:.1f}%** (`{completed_count}/{total_count}` nhiệm vụ)\n"
+            f"• **Tiến độ hoàn tất:** `{overall_bar}` **{overall_ratio:.1f}%** (`{completed_count:02d}/{total_count:02d}` nhiệm vụ)\n"
             f"• **Lượt khả dụng:** `💎 {quota['quota_str']}`\n"
-            f"• **Tổng quest tích lũy:** `🏆 {user_total} nhiệm vụ`"
+            f"• **Tổng quest tích lũy:** `🏆 {user_total:02d} nhiệm vụ`"
         ),
         inline=False
     )
@@ -1084,14 +1085,14 @@ async def build_session_details_response(user_id: int, discord_user: discord.Use
         pct = (done / needed * 100) if needed > 0 else 0
         qbar = make_bar(pct, length=10)
         rem = max(0, int(needed - done))
-        eta_str = f"{rem // 60} phút {rem % 60} giây" if rem >= 60 else f"{rem} giây"
+        eta_str = f"{rem // 60:02d} phút {rem % 60:02d} giây" if rem >= 60 else f"{rem:02d} giây"
 
         embed.add_field(
             name="⚡ Nhiệm Vụ Đang Xử Lý",
             value=(
                 f"• **Nhiệm vụ:** **{q_name}**\n"
                 f"• **Hình thức:** `{task_label}`\n"
-                f"• **Tiến độ:** `{qbar}` **{pct:.1f}%** (`{done:.0f}s / {needed}s`)\n"
+                f"• **Tiến độ:** `{qbar}` **{pct:.1f}%** (`{int(done):02d}s / {int(needed):02d}s`)\n"
                 f"• **Thời gian còn lại:** `⏳ ~{eta_str}`"
             ),
             inline=False
@@ -1124,14 +1125,14 @@ async def build_session_details_response(user_id: int, discord_user: discord.Use
 
     if completed_lines:
         embed.add_field(
-            name=f"🟢 Đã Hoàn Thành ({len(completed_lines)}/{total_count} nhiệm vụ)",
+            name=f"🟢 Đã Hoàn Thành ({len(completed_lines):02d}/{total_count:02d} nhiệm vụ)",
             value="\n".join(completed_lines[:10]),
             inline=False
         )
 
     if pending_lines:
         embed.add_field(
-            name=f"⏳ Danh Sách Chờ Xử Lý ({len(pending_lines)} nhiệm vụ)",
+            name=f"⏳ Danh Sách Chờ Xử Lý ({len(pending_lines):02d} nhiệm vụ)",
             value="\n".join(pending_lines[:10]),
             inline=False
         )
@@ -1169,9 +1170,10 @@ class ControlView(discord.ui.View):
 
         from limits_manager import is_user_limited
         if is_user_limited(interaction.user.id):
-            from payment_views import get_limit_embed_and_view
+            from payment_views import get_limit_embed_and_view, register_invoice
             embed, view = get_limit_embed_and_view(interaction.user.id)
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            register_invoice(interaction, view)
             return
         
         modal = TokenModal(self.bot)
@@ -1205,9 +1207,10 @@ class ControlView(discord.ui.View):
             await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
 
-        from payment_views import get_limit_embed_and_view
+        from payment_views import get_limit_embed_and_view, register_invoice
         embed, view = get_limit_embed_and_view(interaction.user.id)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        register_invoice(interaction, view)
 
     @discord.ui.button(label="Hướng Dẫn", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="btn_guide")
     async def guide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1404,10 +1407,10 @@ class QuestBot(commands.Bot):
                 embed.set_author(name="TXA")
                 
                 active_count = len(config.ACTIVE_USERS)
-                embed.add_field(name="👤 Phiên hiện tại", value=f"```\n{active_count}\n```", inline=True)
-                embed.add_field(name="⏳ Hàng chờ", value="```\n0\n```", inline=True)
-                embed.add_field(name="▶️ Đang chạy", value=f"```\n{active_count}\n```", inline=True)
-                embed.add_field(name="✅ Tổng quest đã hoàn thành", value=f"```\n{config.TOTAL_COMPLETED}\n```", inline=False)
+                embed.add_field(name="👤 Phiên hiện tại", value=f"```\n{active_count:02d}\n```", inline=True)
+                embed.add_field(name="⏳ Hàng chờ", value="```\n00\n```", inline=True)
+                embed.add_field(name="▶️ Đang chạy", value=f"```\n{active_count:02d}\n```", inline=True)
+                embed.add_field(name="✅ Tổng quest đã hoàn thành", value=f"```\n{config.TOTAL_COMPLETED:02d}\n```", inline=False)
                 
                 current_time = time.strftime("%H:%M %d/%m/%y")
                 embed.set_footer(text=f"Auto Scan • Auto Accept • Auto Complete • {current_time} | Quest Bot v4.0 - Built by TXA")
@@ -1623,9 +1626,10 @@ async def start_command(interaction: discord.Interaction):
     if allowed:
         from limits_manager import is_user_limited
         if is_user_limited(interaction.user.id):
-            from payment_views import get_limit_embed_and_view
+            from payment_views import get_limit_embed_and_view, register_invoice
             embed, view = get_limit_embed_and_view(interaction.user.id)
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            register_invoice(interaction, view)
             return
 
         modal = TokenModal(bot)
@@ -1775,8 +1779,8 @@ async def set_limit_command(interaction: discord.Interaction, user_discord_id: s
         description=f"Đã **đặt** số dư lượt cho <@{uid}>."
     )
     embed.add_field(name="👤 Người dùng", value=f"<@{uid}> (ID: `{uid}`)", inline=False)
-    embed.add_field(name="📉 Trước", value=f"`{old_balance} lượt`", inline=True)
-    embed.add_field(name="📈 Sau", value=f"`{balance} lượt`", inline=True)
+    embed.add_field(name="📉 Trước", value=f"`{old_balance:02d} lượt`", inline=True)
+    embed.add_field(name="📈 Sau", value=f"`{balance:02d} lượt`", inline=True)
     embed.add_field(name="🔁 Thay đổi", value=f"`{balance - old_balance:+d}`", inline=True)
     embed.set_footer(text="/set_limit đặt số tuyệt đối • /add_balance để cộng thêm")
 
@@ -2176,6 +2180,7 @@ async def qr_test(interaction: discord.Interaction):
     from payment_views import get_limit_embed_and_view, register_invoice
     _, view = get_limit_embed_and_view(interaction.user.id)
     await interaction.followup.send(view=view, ephemeral=True)
+    register_invoice(interaction, view)
 
 
 # Command: Admin set price per quest (slash command)
@@ -2220,7 +2225,7 @@ async def set_timeout(interaction: discord.Interaction, minutes: int):
     
     await interaction.response.send_message(
         f"✅ **Đã cập nhật thời hạn giao dịch thành công!**\n"
-        f"Mã QR hóa đơn sẽ hết hạn sau: **{minutes} phút** ({seconds} giây).",
+        f"Mã QR hóa đơn sẽ hết hạn sau: **{minutes:02d} phút** ({seconds:02d} giây).",
         ephemeral=True
     )
 
@@ -2293,8 +2298,8 @@ async def add_balance_command(interaction: discord.Interaction, user_discord_id:
         description=f"Đã {'cộng' if amount > 0 else 'trừ'} **{abs(amount)} lượt** cho {'**chính bạn**' if is_self else f'<@{uid}>'}."
     )
     embed.add_field(name="👤 Người dùng", value=f"<@{uid}> (ID: `{uid}`)", inline=False)
-    embed.add_field(name="📉 Trước", value=f"`{old_balance} lượt`", inline=True)
-    embed.add_field(name="📈 Sau", value=f"`{new_balance} lượt`", inline=True)
+    embed.add_field(name="📉 Trước", value=f"`{old_balance:02d} lượt`", inline=True)
+    embed.add_field(name="📈 Sau", value=f"`{new_balance:02d} lượt`", inline=True)
     embed.add_field(name="🔁 Thay đổi", value=f"`{new_balance - old_balance:+d}`", inline=True)
     embed.set_footer(text="/add_balance cộng dồn • /set_limit để đặt số tuyệt đối")
     await interaction.response.send_message(embed=embed, ephemeral=True)

@@ -172,9 +172,9 @@ class QuestAutocompleter:
         if not unaccepted:
             return quests
 
-        log(f"Tìm thấy {len(unaccepted)} quest chưa nhận – đang auto-accept...", "info")
+        log(f"Tìm thấy {len(unaccepted):02d} quest chưa nhận – đang auto-accept...", "info")
         if self.status_callback:
-            await self.status_callback(f"{config.EMOJI_LOADING} **Đang nhận {len(unaccepted)} nhiệm vụ mới...**")
+            await self.status_callback(f"{config.EMOJI_LOADING} **Đang nhận {len(unaccepted):02d} nhiệm vụ mới...**")
 
         for q in unaccepted:
             if self.stop_event.is_set():
@@ -197,11 +197,11 @@ class QuestAutocompleter:
         else:
             enrolled_ts = time.time()
 
-        log(f"🎬 Video: {Colors.BOLD}{name}{Colors.RESET} ({seconds_done:.0f}/{seconds_needed}s)", "info")
+        log(f"🎬 Video: {Colors.BOLD}{name}{Colors.RESET} ({int(seconds_done):02d}/{int(seconds_needed):02d}s)", "info")
         if self.status_callback:
             await self.status_callback(
                 f"🎬 **Nhiệm vụ:** {name}\n"
-                f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({seconds_done:.0f}/{seconds_needed}s)\n"
+                f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({int(seconds_done):02d}/{int(seconds_needed):02d}s)\n"
                 f"⚡ *Loại hình:* Xem Video Mobile/Desktop"
             )
 
@@ -231,11 +231,11 @@ class QuestAutocompleter:
                         seconds_done = min(seconds_needed, timestamp)
                         if self.current_quest_info:
                             self.current_quest_info["done"] = seconds_done
-                        log(f"  [{name}] {seconds_done:.0f}/{seconds_needed}s", "progress")
+                        log(f"  [{name}] {int(seconds_done):02d}/{int(seconds_needed):02d}s", "progress")
                         if self.status_callback:
                             await self.status_callback(
                                 f"🎬 **Nhiệm vụ:** {name}\n"
-                                f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({seconds_done:.0f}/{seconds_needed}s)\n"
+                                f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({int(seconds_done):02d}/{int(seconds_needed):02d}s)\n"
                                 f"⚡ *Loại hình:* Xem Video Mobile/Desktop"
                             )
                     elif r.status == 429:
@@ -268,15 +268,15 @@ class QuestAutocompleter:
         remaining = max(0, seconds_needed - seconds_done)
         log(
             f"🎮 {task_type}: {Colors.BOLD}{name}{Colors.RESET} "
-            f"(~{remaining // 60} phút còn lại)",
+            f"(~{remaining // 60:02d} phút còn lại)",
             "info"
         )
         if self.status_callback:
             await self.status_callback(
                 f"🎮 **Nhiệm vụ:** {name}\n"
-                f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({seconds_done:.0f}/{seconds_needed}s)\n"
+                f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({int(seconds_done):02d}/{int(seconds_needed):02d}s)\n"
                 f"⚡ *Loại hình:* {task_type}\n"
-                f"⏳ ~{remaining // 60} phút còn lại"
+                f"⏳ ~{remaining // 60:02d} phút còn lại"
             )
 
         pid = random.randint(1000, 30000)
@@ -299,15 +299,15 @@ class QuestAutocompleter:
                         seconds_done = progress_data[task_type].get("value", seconds_done)
                     if self.current_quest_info:
                         self.current_quest_info["done"] = seconds_done
-                    log(f"  [{name}] {seconds_done:.0f}/{seconds_needed}s", "progress")
+                    log(f"  [{name}] {int(seconds_done):02d}/{int(seconds_needed):02d}s", "progress")
 
                     remaining = max(0, seconds_needed - seconds_done)
                     if self.status_callback:
                         await self.status_callback(
                             f"🎮 **Nhiệm vụ:** {name}\n"
-                            f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({seconds_done:.0f}/{seconds_needed}s)\n"
+                            f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({int(seconds_done):02d}/{int(seconds_needed):02d}s)\n"
                             f"⚡ *Loại hình:* {task_type}\n"
-                            f"⏳ ~{remaining // 60} phút còn lại"
+                            f"⏳ ~{remaining // 60:02d} phút còn lại"
                         )
 
                     if body.get("completed_at") or seconds_done >= seconds_needed:
@@ -345,15 +345,15 @@ class QuestAutocompleter:
         remaining = max(0, seconds_needed - seconds_done)
         log(
             f"🕹️  Activity: {Colors.BOLD}{name}{Colors.RESET} "
-            f"(~{remaining // 60} phút còn lại)",
+            f"(~{remaining // 60:02d} phút còn lại)",
             "info"
         )
         if self.status_callback:
             await self.status_callback(
                 f"🕹️ **Nhiệm vụ:** {name}\n"
-                f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({seconds_done:.0f}/{seconds_needed}s)\n"
+                f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({int(seconds_done):02d}/{int(seconds_needed):02d}s)\n"
                 f"⚡ *Loại hình:* Chơi Activity\n"
-                f"⏳ ~{remaining // 60} phút còn lại"
+                f"⏳ ~{remaining // 60:02d} phút còn lại"
             )
 
         stream_key = "call:0:1"
@@ -376,15 +376,15 @@ class QuestAutocompleter:
                         seconds_done = progress_data["PLAY_ACTIVITY"].get("value", seconds_done)
                     if self.current_quest_info:
                         self.current_quest_info["done"] = seconds_done
-                    log(f"  [{name}] {seconds_done:.0f}/{seconds_needed}s", "progress")
+                    log(f"  [{name}] {int(seconds_done):02d}/{int(seconds_needed):02d}s", "progress")
 
                     remaining = max(0, seconds_needed - seconds_done)
                     if self.status_callback:
                         await self.status_callback(
                             f"🕹️ **Nhiệm vụ:** {name}\n"
-                            f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({seconds_done:.0f}/{seconds_needed}s)\n"
+                            f"📈 **Tiến độ:** `{get_progress_bar(seconds_done, seconds_needed)}` ({int(seconds_done):02d}/{int(seconds_needed):02d}s)\n"
                             f"⚡ *Loại hình:* Chơi Activity\n"
-                            f"⏳ ~{remaining // 60} phút còn lại"
+                            f"⏳ ~{remaining // 60:02d} phút còn lại"
                         )
 
                     if body.get("completed_at") or seconds_done >= seconds_needed:
@@ -484,7 +484,7 @@ class QuestAutocompleter:
         cycle = 0
         while not self.stop_event.is_set():
             cycle += 1
-            log(f"── Quét lần #{cycle} ──", "info")
+            log(f"── Quét lần #{cycle:02d} ──", "info")
 
             quests = await self.fetch_quests()
             total = len(quests)
@@ -500,8 +500,8 @@ class QuestAutocompleter:
                 completable_count = sum(1 for q in quests if is_completable(q))
 
                 log(
-                    f"Tổng: {total} quest | Enrolled: {enrolled_count} | "
-                    f"Completed: {completed_count} | Completable: {completable_count}",
+                    f"Tổng: {total:02d} quest | Enrolled: {enrolled_count:02d} | "
+                    f"Completed: {completed_count:02d} | Completable: {completable_count:02d}",
                     "info"
                 )
 
@@ -514,7 +514,7 @@ class QuestAutocompleter:
                 ]
 
                 if actionable:
-                    log(f"\n{len(actionable)} quest(s) cần hoàn thành:", "info")
+                    log(f"\n{len(actionable):02d} quest(s) cần hoàn thành:", "info")
                     for q in actionable:
                         if self.stop_event.is_set():
                             break
