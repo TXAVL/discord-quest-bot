@@ -122,11 +122,49 @@ def get_price_per_quest() -> int:
     return limits.get("price_per_quest", 10000)
 
 def set_price_per_quest(price: int):
-    """Đặt đơn giá mới cho mỗi lượt quest."""
+    """Đặt đơn giá mới cho mỗi lượt quest (đồng thời quay lại ưu đãi giảm giá ngẫu nhiên)."""
     limits = load_limits()
     limits["price_per_quest"] = price
     save_limits(limits)
     log(f"Đã cập nhật giá mới: {price} VNĐ/lượt", "ok")
+    roll_discounts()
+
+
+# Các gói mua và khoảng % giảm giá ngẫu nhiên (mua càng nhiều giảm càng sâu)
+PACKAGES = [1, 2, 5, 10, 20, 50]
+DISCOUNT_RANGES = {1: (0, 0), 2: (2, 5), 5: (5, 10), 10: (10, 16), 20: (15, 24), 50: (22, 35)}
+
+
+def roll_discounts() -> dict:
+    """Quay ngẫu nhiên % ưu đãi cho từng gói. Đảm bảo gói lớn hơn không bao giờ giảm ít hơn gói nhỏ."""
+    discounts, prev = {}, 0
+    for qty in PACKAGES:
+        lo, hi = DISCOUNT_RANGES[qty]
+        pct = max(random.randint(lo, hi), prev)
+        discounts[str(qty)] = pct
+        prev = pct
+    limits = load_limits()
+    limits["discounts"] = discounts
+    save_limits(limits)
+    log(f"Đã quay ưu đãi ngẫu nhiên: {discounts}", "ok")
+    return discounts
+
+
+def get_discounts() -> dict:
+    limits = load_limits()
+    d = limits.get("discounts")
+    if not d:
+        return roll_discounts()
+    return d
+
+
+def get_package_info(qty: int) -> dict:
+    """Giá gói gồm: giá gốc, % giảm, giá phải trả (làm tròn 100đ), số tiền tiết kiệm."""
+    price = get_price_per_quest()
+    pct = int(get_discounts().get(str(qty), 0))
+    original = price * qty
+    final = max(100, int(round(original * (100 - pct) / 100 / 100.0)) * 100)
+    return {"qty": qty, "pct": pct, "original": original, "final": final, "saved": original - final}
 
 def create_transaction(user_id: int, quests: int) -> Optional[dict]:
     """Tạo giao dịch mua lượt cho người dùng. Trả về thông tin giao dịch hoặc None nếu đã có giao dịch chờ."""
@@ -148,7 +186,8 @@ def create_transaction(user_id: int, quests: int) -> Optional[dict]:
         
     order_id = generate_order_id(limits)
     price = get_price_per_quest()
-    amount = quests * price
+    info = get_package_info(quests)
+    amount = info["final"]
     
     tx = {
         "order_id": order_id,
@@ -159,7 +198,7 @@ def create_transaction(user_id: int, quests: int) -> Optional[dict]:
     
     user_data["active_transaction"] = tx
     save_limits(limits)
-    log(f"Tạo giao dịch mới cho {user_id}: {order_id} - {amount} VNĐ cho {quests} quest (giá {price} VNĐ/lượt)", "info")
+    log(f"Tạo giao dịch mới cho {user_id}: {order_id} - {amount} VNĐ cho {quests} quest (giảm {info['pct']}%)", "info")
     return tx
 
 def cancel_transaction(user_id: int):

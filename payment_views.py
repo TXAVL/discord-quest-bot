@@ -1,7 +1,13 @@
 import asyncio
+
+import aiohttp
 import discord
-import time
+
 import config
+from txa_layout import (
+    TxaView, box, row_of, btn, _resolve, MISSING, PACKAGE_EMOJI,
+    GREEN, YELLOW, ORANGE,
+)
 from limits_manager import (
     get_active_transaction,
     create_transaction,
@@ -11,40 +17,47 @@ from limits_manager import (
     get_pending_transactions,
     complete_transaction,
     get_price_per_quest,
+    get_package_info,
+    PACKAGES,
     get_transaction_timeout,
-    get_user_quota_info
+    get_user_quota_info,
 )
-
 
 # order_id -> interaction đang hiển thị hóa đơn (để tự cập nhật tin nhắn khi thanh toán xong)
 LIVE_INVOICES = {}
 AUTO_CHECK_INTERVAL = 6
 
 
+def qr_url(order_id: str, amount: int) -> str:
+    return (
+        f"https://img.vietqr.io/image/{config.BANK_ID}-{config.ACCOUNT_NO}-compact.png"
+        f"?amount={amount}&addInfo={order_id}&accountName={config.ACCOUNT_NAME.replace(' ', '%20')}"
+    )
+
+
 def register_invoice(interaction: discord.Interaction, view):
     """Gắn interaction đang hiển thị hóa đơn để tự cập nhật khi tiền về."""
-    if isinstance(view, QuestPaymentConfirmView):
+    if isinstance(view, InvoiceLayoutView):
         LIVE_INVOICES[view.order_id] = interaction
 
 
-def build_success_embed(tx: dict, user_id: int, auto: bool) -> discord.Embed:
-    quota_info = get_user_quota_info(user_id)
-    embed = discord.Embed(
-        title="🎉 THANH TOÁN THÀNH CÔNG!",
-        color=discord.Color.from_rgb(87, 242, 135),
-        description=(
-            f"### {config.EMOJI_SUCCESS} Hệ Thống Đã Nhận Được Tiền!\n"
-            f"{'⚡ Hệ thống đã **tự động phát hiện** chuyển khoản của bạn.' if auto else 'Đã xác thực giao dịch chuyển khoản thành công từ ngân hàng.'}\n\n"
-            f"• 📝 **Mã đơn hàng:** `{tx['order_id']}`\n"
-            f"• 💰 **Số tiền đã nhận:** `{tx['amount']:,} VNĐ`\n"
-            f"• 📦 **Lượt quest được cộng:** `+{tx['quests_to_buy']} lượt`\n"
-            f"• 💎 **Số dư khả dụng hiện tại:** **{quota_info['quota_str']}**\n\n"
-            f"🚀 Dùng `/details` để theo dõi tiến độ hoặc `/history` để xem lịch sử nạp."
-        )
-    )
-    embed.set_footer(text="⏱️ Tin nhắn này sẽ tự động đóng sau 10 giây • Cảm ơn quý khách")
-    embed.timestamp = discord.utils.utcnow()
-    return embed
+def build_success_view(tx: dict, user_id: int, auto: bool) -> TxaView:
+    info = get_user_quota_info(user_id)
+    view = TxaView(user_id, timeout=60)
+    view.add_item(box(
+        "### 🎉 THANH TOÁN THÀNH CÔNG!",
+        f"{config.EMOJI_SUCCESS} **Hệ thống đã nhận được tiền!**\n"
+        f"{'⚡ Hệ thống đã **tự động phát hiện** chuyển khoản của bạn.' if auto else 'Đã xác thực giao dịch chuyển khoản thành công từ ngân hàng.'}",
+        "---",
+        f"📝 **Mã đơn hàng:** `{tx['order_id']}`\n"
+        f"💰 **Số tiền đã nhận:** `{tx['amount']:,} VNĐ`\n"
+        f"📦 **Lượt quest được cộng:** `+{tx['quests_to_buy']} lượt`\n"
+        f"💎 **Số dư khả dụng hiện tại:** **{info['quota_str']}**",
+        "🚀 Dùng `/details` để theo dõi tiến độ hoặc `/history` để xem lịch sử nạp.",
+        "-# ⏱️ Tin nhắn này sẽ tự đóng sau 10 giây • Cảm ơn quý khách",
+        accent=GREEN,
+    ))
+    return view
 
 
 def _schedule_delete(interaction: discord.Interaction, delay: int = 10):
@@ -71,12 +84,12 @@ async def payment_watcher(bot):
                     done = complete_transaction(user_id, tx["order_id"])
                     if not done:
                         continue
-                    embed = build_success_embed(done, user_id, auto=True)
+                    success = build_success_view(done, user_id, auto=True)
                     inter = LIVE_INVOICES.pop(done["order_id"], None)
                     edited = False
                     if inter:
                         try:
-                            await inter.edit_original_response(embed=embed, view=None)
+                            await inter.edit_original_response(view=success)
                             _schedule_delete(inter)
                             edited = True
                         except Exception:
@@ -84,7 +97,7 @@ async def payment_watcher(bot):
                     if not edited:
                         try:
                             user = bot.get_user(user_id) or await bot.fetch_user(user_id)
-                            await user.send(embed=embed)
+                            await user.send(view=success)
                         except Exception:
                             pass
         except Exception as e:
@@ -93,116 +106,192 @@ async def payment_watcher(bot):
         await asyncio.sleep(AUTO_CHECK_INTERVAL)
 
 
-class QuestPurchaseDropdown(discord.ui.Select):
-    def __init__(self, user_id):
-        price = get_price_per_quest()
-        options = [
-            discord.SelectOption(label=f"1 Lượt Quest - {price:,}đ", value="1", emoji="💎", description="Mua lẻ 1 lượt làm quest tự động"),
-            discord.SelectOption(label=f"2 Lượt Quest - {price*2:,}đ", value="2", emoji="🎫", description="Mua 2 lượt làm quest tự động"),
-            discord.SelectOption(label=f"5 Lượt Quest - {price*5:,}đ", value="5", emoji="🔥", description="Tiết kiệm - Mua 5 lượt làm quest"),
-            discord.SelectOption(label=f"10 Lượt Quest - {price*10:,}đ", value="10", emoji="👑", description="Gói lớn - Mua 10 lượt làm quest")
-        ]
-        super().__init__(placeholder="Chọn số lượng lượt quest muốn mua...", min_values=1, max_values=1, options=options)
-        self.user_id = user_id
+# ───────────────────────── Cửa hàng ─────────────────────────
+
+class PackageSelect(discord.ui.Select):
+    def __init__(self, layout):
+        options = []
+        for qty in PACKAGES:
+            info = get_package_info(qty)
+            desc = f"Giảm {info['pct']}% • tiết kiệm {info['saved']:,}đ" if info["pct"] else "Mua lẻ, không giảm giá"
+            options.append(discord.SelectOption(
+                label=f"{qty} Lượt Quest - {info['final']:,}đ",
+                value=str(qty), emoji=PACKAGE_EMOJI.get(qty, "💎"), description=desc
+            ))
+        super().__init__(placeholder="🛒 Nhấn vào đây để chọn gói muốn mua", options=options)
+        self.layout = layout
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Menu này không dành cho bạn.", ephemeral=True)
-            return
-
-        # Hiển thị trạng thái khởi tạo giao dịch
-        loading_embed = discord.Embed(
-            title="⚙️ Đang Khởi Tạo Giao Dịch",
-            color=discord.Color.from_rgb(88, 101, 242),
-            description=f"{config.EMOJI_LOADING} Hệ thống đang tạo mã đơn hàng và mã VietQR thanh toán, vui lòng đợi..."
-        )
-        self.disabled = True
-        await interaction.response.edit_message(embed=loading_embed, view=None)
-
+        user_id = self.layout.user_id
         quantity = int(self.values[0])
-        
-        # Tạo giao dịch mới
-        tx = create_transaction(self.user_id, quantity)
+
+        loading = TxaView(user_id, timeout=60)
+        loading.add_item(box(
+            "### ⚙️ Đang Khởi Tạo Giao Dịch",
+            f"{config.EMOJI_LOADING} Hệ thống đang tạo mã đơn hàng và mã VietQR thanh toán, vui lòng đợi...",
+        ))
+        await interaction.response.edit_message(view=loading)
+
+        tx = create_transaction(user_id, quantity)
         if not tx:
             await interaction.followup.send(
-                "❌ **Bạn đang có một giao dịch chưa hoàn tất!**\n"
-                "Vui lòng thanh toán giao dịch trước đó hoặc bấm nút **Hủy Giao Dịch** để tạo đơn mới.",
+                "❌ **Bạn đang có một giao dịch chưa hoàn tất!** Hãy thanh toán hoặc bấm **Hủy Giao Dịch** để tạo đơn mới.",
                 ephemeral=True
             )
-            embed, view = get_limit_embed_and_view(self.user_id)
-            await interaction.edit_original_response(embed=embed, view=view)
+            _, view = get_limit_embed_and_view(user_id, back=self.layout.back)
+            await interaction.edit_original_response(view=view)
+            register_invoice(interaction, view)
             return
 
-        # Tải trước ảnh VietQR để tối ưu tốc độ hiển thị
-        import aiohttp
-        order_id = tx["order_id"]
-        amount = tx["amount"]
-        qr_url = (
-            f"https://img.vietqr.io/image/{config.BANK_ID}-{config.ACCOUNT_NO}-compact.png"
-            f"?amount={amount}&addInfo={order_id}&accountName={config.ACCOUNT_NAME.replace(' ', '%20')}"
-        )
+        # Tải trước ảnh VietQR để hiển thị nhanh
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(qr_url, timeout=5) as r:
+                async with session.get(qr_url(tx["order_id"], tx["amount"]), timeout=aiohttp.ClientTimeout(total=5)) as r:
                     if r.status == 200:
                         await r.read()
         except Exception:
             pass
 
-        # Cập nhật giao diện hóa đơn kèm VietQR
-        embed, view = get_limit_embed_and_view(self.user_id)
-        LIVE_INVOICES[order_id] = interaction
-        await interaction.edit_original_response(embed=embed, view=view)
+        _, view = get_limit_embed_and_view(user_id, back=self.layout.back)
+        LIVE_INVOICES[tx["order_id"]] = interaction
+        await interaction.edit_original_response(view=view)
 
 
-class QuestLimitPurchaseView(discord.ui.View):
-    def __init__(self, user_id):
-        super().__init__(timeout=300)
-        self.add_item(QuestPurchaseDropdown(user_id))
+class ShopLayoutView(TxaView):
+    def __init__(self, user_id: int, back=None):
+        super().__init__(user_id, back, timeout=300)
+        self.build()
+
+    def build(self):
+        self.clear_items()
+        info = get_user_quota_info(self.user_id)
+        lines = []
+        for qty in PACKAGES:
+            p = get_package_info(qty)
+            emoji = PACKAGE_EMOJI.get(qty, "💎")
+            if p["pct"]:
+                lines.append(f"{emoji} **{qty} lượt** • ~~{p['original']:,}đ~~ ➜ **{p['final']:,}đ** `-{p['pct']}%`")
+            else:
+                lines.append(f"{emoji} **{qty} lượt** • **{p['final']:,}đ**")
+        row = discord.ui.ActionRow()
+        row.add_item(PackageSelect(self))
+        self.add_item(box(
+            "### 💎 Cửa Hàng Lượt Quest & Số Dư",
+            f"{config.EMOJI_ROCKET} Mua thêm lượt làm Quest tự động, không cần thao tác tay.",
+            f"👤 <@{self.user_id}>\n💎 Lượt hiện có: **{info['quota_str']}**\n🏆 Đã hoàn thành: `{info['total_completed']} nhiệm vụ`",
+            "---",
+            f"**🏷️ Bảng Giá • {get_price_per_quest():,}đ / lượt**\n" + "\n".join(lines),
+            "🎁 Mua càng nhiều, giảm càng sâu! Mức giảm được **quay ngẫu nhiên** mỗi lần bot khởi động hoặc khi Admin đổi giá.",
+            "---",
+            "**🛒 Chọn gói**",
+            row,
+            "-# ✨ Lượt mua không giới hạn thời gian sử dụng và có thể tích lũy.",
+        ))
+
+        async def refresh(interaction: discord.Interaction):
+            self.build()
+            await interaction.response.edit_message(view=self)
+
+        self.add_item(self.nav_row(
+            refresh=refresh,
+            help_text="ℹ️ Chọn một gói ở menu để tạo mã VietQR. Chuyển khoản đúng số tiền và nội dung, hệ thống **tự động cộng lượt** khi tiền về.",
+        ))
 
 
-class QuestPaymentConfirmView(discord.ui.View):
-    def __init__(self, user_id, order_id, amount, quantity):
-        super().__init__(timeout=300)
-        self.user_id = user_id
-        self.order_id = order_id
-        self.amount = amount
-        self.quantity = quantity
+# ───────────────────────── Hóa đơn ─────────────────────────
 
-    @discord.ui.button(label="Kiểm Tra Ngay", style=discord.ButtonStyle.success, emoji="✅")
-    async def confirm_payment(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Nút bấm này không dành cho bạn.", ephemeral=True)
-            return
+class ConfirmLeaveView(TxaView):
+    """Hỏi xác nhận khi rời khỏi hóa đơn chưa thanh toán."""
 
-        # Kiểm tra xem đơn hàng còn hiệu lực hay đã hết hạn
+    def __init__(self, user_id: int, tx: dict, back):
+        super().__init__(user_id, back, timeout=120)
+        expire_ts = tx["created_at"] + get_transaction_timeout()
+        self.add_item(box(
+            "### ⚠️ Hóa Đơn Chưa Thanh Toán",
+            f"Bạn đang có hóa đơn `{tx['order_id']}` (**{tx['amount']:,} VNĐ**) chưa được thanh toán.",
+            f"• Nếu quay lại, hóa đơn **vẫn còn hiệu lực** đến <t:{expire_ts}:T> (<t:{expire_ts}:R>).\n"
+            f"• Nếu bạn chuyển khoản trong thời gian này, hệ thống **vẫn tự cộng lượt**.\n"
+            f"• Muốn xóa hẳn hóa đơn, hãy chọn **Hủy Giao Dịch** ở màn hình hóa đơn.",
+            "**Bạn có chắc muốn quay lại không?**",
+            accent=ORANGE,
+        ))
+
+        async def leave(interaction: discord.Interaction):
+            view = await _resolve(self.back, interaction)
+            await interaction.response.edit_message(view=view)
+
+        async def stay(interaction: discord.Interaction):
+            _, view = get_limit_embed_and_view(self.user_id, back=self.back)
+            await interaction.response.edit_message(view=view)
+            register_invoice(interaction, view)
+
+        self.add_item(row_of(
+            btn("Vẫn Quay Lại", "◀️", leave, style=discord.ButtonStyle.primary),
+            btn("Ở Lại Hóa Đơn", "💳", stay, style=discord.ButtonStyle.success),
+        ))
+
+
+class InvoiceLayoutView(TxaView):
+    def __init__(self, user_id: int, tx: dict, back=None):
+        super().__init__(user_id, back, timeout=300)
+        self.tx = tx
+        self.order_id = tx["order_id"]
+        self.amount = tx["amount"]
+        self.quantity = tx["quests_to_buy"]
+        self.build()
+
+    def build(self):
+        self.clear_items()
+        info = get_user_quota_info(self.user_id)
+        pkg = get_package_info(self.quantity)
+        expire_ts = self.tx["created_at"] + get_transaction_timeout()
+        deadline = f"<t:{expire_ts}:R> (lúc <t:{expire_ts}:T>)"
+        discount = f" • giảm {pkg['pct']}%" if pkg["pct"] else ""
+        self.add_item(box(
+            "### 💳 Hóa Đơn Chuyển Khoản Mua Lượt Quest",
+            "Quét mã VietQR bên dưới — app ngân hàng sẽ tự điền đúng số tài khoản, số tiền và nội dung.",
+            f"⏳ **Thời hạn thanh toán:** {deadline}",
+            "---",
+            f"🏦 **Ngân hàng:** {config.BANK_ID} (Quân Đội)\n"
+            f"🔢 **Số tài khoản:** `{config.ACCOUNT_NO}`\n"
+            f"👤 **Chủ tài khoản:** `{config.ACCOUNT_NAME}`\n"
+            f"💰 **Số tiền:** `{self.amount:,} VNĐ`\n"
+            f"📝 **Nội dung CK:** `{self.order_id}`\n"
+            f"📦 **Gói mua:** +{self.quantity} lượt làm quest{discount}",
+            discord.ui.MediaGallery(discord.MediaGalleryItem(qr_url(self.order_id, self.amount))),
+            "---",
+            f"💎 Số dư hiện có: **{info['quota_str']}** • Đã hoàn thành: `{info['total_completed']}`",
+            f"-# 🔄 Hệ thống tự động kiểm tra mỗi {AUTO_CHECK_INTERVAL} giây — chuyển khoản xong chỉ cần đợi, "
+            f"hoặc bấm 'Kiểm Tra Ngay'. Hãy ghi chính xác nội dung `{self.order_id}`.",
+            accent=YELLOW,
+        ))
+        items = [
+            btn("Kiểm Tra Ngay", "✅", self._check, style=discord.ButtonStyle.success),
+            btn("Hủy Giao Dịch", "❌", self._cancel, style=discord.ButtonStyle.danger),
+        ]
+        if self.back:
+            items.append(btn("Quay lại", "◀️", self._leave))
+        self.add_item(row_of(*items))
+
+    async def _check(self, interaction: discord.Interaction):
         tx = get_active_transaction(self.user_id)
         if not tx or tx.get("order_id") != self.order_id:
-            embed, view = get_limit_embed_and_view(self.user_id)
-            if interaction.response.is_done():
-                await interaction.edit_original_response(embed=embed, view=view)
-            else:
-                await interaction.response.edit_message(embed=embed, view=view)
+            _, view = get_limit_embed_and_view(self.user_id, back=self.back)
+            await interaction.response.edit_message(view=view)
             await interaction.followup.send(
-                "❌ **Giao dịch đã hết hạn!**\n"
-                "Mã QR này không còn hiệu lực. Vui lòng chọn số lượng để tạo đơn mới.",
-                ephemeral=True
-            )
+                "❌ **Giao dịch đã hết hạn hoặc đã xử lý!** Vui lòng chọn gói để tạo đơn mới.", ephemeral=True)
             return
 
         await interaction.response.defer()
         LIVE_INVOICES[self.order_id] = interaction
-
         tx_list = await fetch_sepay_transactions()
         if match_payment(tx_list, self.order_id, self.amount):
             done = complete_transaction(self.user_id, self.order_id)
             if done:
                 LIVE_INVOICES.pop(self.order_id, None)
-                await interaction.edit_original_response(embed=build_success_embed(done, self.user_id, auto=False), view=None)
+                await interaction.edit_original_response(view=build_success_view(done, self.user_id, auto=False))
                 _schedule_delete(interaction)
-                return
-            # Đơn đã được vòng quét tự động xử lý trước đó
-            return
+            return  # nếu không: đã được vòng quét tự động xử lý trước đó
 
         await interaction.followup.send(
             f"⏳ **Chưa thấy tiền về.**\n"
@@ -211,94 +300,25 @@ class QuestPaymentConfirmView(discord.ui.View):
             ephemeral=True
         )
 
-    @discord.ui.button(label="Hủy Giao Dịch", style=discord.ButtonStyle.danger, emoji="❌")
-    async def cancel_payment(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Nút bấm này không dành cho bạn.", ephemeral=True)
-            return
-
+    async def _cancel(self, interaction: discord.Interaction):
         cancel_transaction(self.user_id)
         LIVE_INVOICES.pop(self.order_id, None)
-        
-        # Quay về màn hình chọn số lượng mua
-        embed, view = get_limit_embed_and_view(self.user_id)
-        if interaction.response.is_done():
-            await interaction.edit_original_response(embed=embed, view=view)
-        else:
-            await interaction.response.edit_message(embed=embed, view=view)
+        _, view = get_limit_embed_and_view(self.user_id, back=self.back)
+        await interaction.response.edit_message(view=view)
         await interaction.followup.send("🛑 Đã hủy giao dịch hiện tại.", ephemeral=True)
 
-
-def get_limit_embed_and_view(user_id: int):
-    """Lấy Embed và View giao diện thanh toán hoặc giới hạn/số dư phù hợp cho user."""
-    tx = get_active_transaction(user_id)
-    quota_info = get_user_quota_info(user_id)
-    
-    if tx:
-        # User đang có đơn hàng chờ thanh toán: hiển thị hóa đơn VietQR
-        order_id = tx["order_id"]
-        amount = tx["amount"]
-        quantity = tx["quests_to_buy"]
-        created_at = tx["created_at"]
-        timeout = get_transaction_timeout()
-        expire_ts = created_at + timeout
-        
-        if timeout < 3600:
-            time_limit_str = f"<t:{expire_ts}:R> (vào lúc <t:{expire_ts}:T>)"
+    async def _leave(self, interaction: discord.Interaction):
+        tx = get_active_transaction(self.user_id)
+        if not tx or tx.get("order_id") != self.order_id:
+            view = await _resolve(self.back, interaction)  # đã thanh toán / hết hạn -> quay lại luôn
         else:
-            time_limit_str = f"vào lúc <t:{expire_ts}:F>"
-        
-        qr_url = (
-            f"https://img.vietqr.io/image/{config.BANK_ID}-{config.ACCOUNT_NO}-compact.png"
-            f"?amount={amount}&addInfo={order_id}&accountName={config.ACCOUNT_NAME.replace(' ', '%20')}"
-        )
-        
-        embed = discord.Embed(
-            title="💳 HÓA ĐƠN CHUYỂN KHOẢN MUA LƯỢT QUEST",
-            color=discord.Color.from_rgb(254, 231, 92), # Gold
-            description=(
-                f"### Quét mã VietQR bên dưới để thanh toán nhanh\n"
-                f"App ngân hàng sẽ tự động điền đúng số tài khoản, số tiền và nội dung chuyển khoản.\n\n"
-                f"⏳ **Thời hạn thanh toán:** {time_limit_str}\n\n"
-                f"⚠️ **LƯU Ý QUAN TRỌNG:**\n"
-                f"Hệ thống **tự động phát hiện** chuyển khoản qua SePay 24/7 và cộng lượt ngay, không cần bấm gì. Hãy ghi **chính xác nội dung** `{order_id}`."
-            )
-        )
-        embed.add_field(name="🏦 Ngân Hàng", value=f"**{config.BANK_ID}** (Quân Đội)", inline=True)
-        embed.add_field(name="🔢 Số Tài Khoản", value=f"`{config.ACCOUNT_NO}`", inline=True)
-        embed.add_field(name="👤 Chủ Tài Khoản", value=f"`{config.ACCOUNT_NAME}`", inline=True)
-        embed.add_field(name="💰 Số Tiền", value=f"`{amount:,} VNĐ`", inline=True)
-        embed.add_field(name="📝 Nội Dung CK", value=f"`{order_id}`", inline=True)
-        embed.add_field(name="📦 Gói Mua", value=f"**+{quantity} lượt làm quest**", inline=True)
-        embed.add_field(
-            name="💎 Số Dư Hiện Có",
-            value=f"• Lượt khả dụng: **{quota_info['quota_str']}**\n• Đã hoàn thành: `{quota_info['total_completed']} nhiệm vụ`",
-            inline=False
-        )
-        
-        embed.set_image(url=qr_url)
-        embed.set_footer(text="🔄 Tự động kiểm tra mỗi 6 giây — chuyển khoản xong chỉ cần đợi, hoặc bấm 'Kiểm Tra Ngay'.")
-        
-        view = QuestPaymentConfirmView(user_id, order_id, amount, quantity)
-        return embed, view
-    else:
-        # Không có giao dịch chờ: hiển thị menu mua lượt và số dư hiện có
-        price = get_price_per_quest()
-        embed = discord.Embed(
-            title="💎 CỬA HÀNG LƯỢT QUEST & SỐ DƯ",
-            color=discord.Color.from_rgb(88, 101, 242), # Blurple
-            description=(
-                f"### {config.EMOJI_ROCKET} Mua Thêm Lượt Làm Quest Tự Động\n"
-                f"Hệ thống cho phép bạn làm nhiệm vụ Discord Quest nhanh chóng không cần thao tác tay.\n\n"
-                f"📊 **Thông Tin Số Dư Của Bạn:**\n"
-                f"• 👤 Người dùng: <@{user_id}>\n"
-                f"• 💎 Lượt quest hiện có: **{quota_info['quota_str']}**\n"
-                f"• 🏆 Đã hoàn thành tích lũy: `{quota_info['total_completed']} nhiệm vụ`\n\n"
-                f"💵 **Bảng Giá:** `{price:,} VNĐ` / 1 lượt quest\n"
-                f"✨ *Lượt mua không giới hạn thời gian sử dụng và có thể tích lũy.*"
-            )
-        )
-        embed.set_footer(text="Chọn gói lượt bạn muốn mua ở menu bên dưới để tạo mã VietQR.")
-        
-        view = QuestLimitPurchaseView(user_id)
-        return embed, view
+            view = ConfirmLeaveView(self.user_id, tx, self.back)
+        await interaction.response.edit_message(view=view)
+
+
+def get_limit_embed_and_view(user_id: int, back=None):
+    """Trả về (MISSING, view) — giữ chữ ký cũ (embed, view); embed luôn bỏ trống vì giao diện dùng Components V2."""
+    tx = get_active_transaction(user_id)
+    if tx:
+        return MISSING, InvoiceLayoutView(user_id, tx, back)
+    return MISSING, ShopLayoutView(user_id, back)

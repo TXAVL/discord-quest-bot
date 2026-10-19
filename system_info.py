@@ -26,6 +26,17 @@ def make_bar(percent: float, length: int = 10) -> str:
     return "▰" * filled + "▱" * empty
 
 
+def slider_bar(percent: float, length: int = 16) -> str:
+    """Thanh tiến trình dạng slider mảnh: ━━━━●─────── (không dùng ô vuông)."""
+    pct = max(0.0, min(100.0, float(percent)))
+    pos = int(round((pct / 100.0) * (length - 1)))
+    return "━" * pos + "●" + "─" * (length - 1 - pos)
+
+
+def load_icon(percent: float) -> str:
+    return "🟢" if percent < 60 else "🟡" if percent < 85 else "🔴"
+
+
 def get_os_info() -> str:
     """Xác định chi tiết hệ điều hành (Ubuntu, Debian, Termux Android, Windows, macOS)."""
     # 1. Kiểm tra môi trường Termux trên Android
@@ -311,71 +322,3 @@ def get_realtime_quest_stats() -> Tuple[int, int]:
     config.TOTAL_COMPLETED = total_completed
     config.TOTAL_FAILED = total_failed
     return total_completed, total_failed
-
-
-def build_system_embed(bot, bot_start_time: float) -> discord.Embed:
-    """Embed thống kê hệ thống dạng bảng điều khiển gọn, 3 cột."""
-    now = time.time()
-    uptime_seconds = int(now - bot_start_time)
-    start_ts = int(bot_start_time)
-
-    days, rem = divmod(uptime_seconds, 86400)
-    hours, rem = divmod(rem, 3600)
-    mins, secs = divmod(rem, 60)
-    exact_duration = (f"{days}d " if days else "") + f"{hours:02d}:{mins:02d}:{secs:02d}"
-
-    cpu = get_cpu_info()
-    ram = get_ram_info()
-    disk = get_disk_info()
-    bot_ram_mb = get_process_memory()
-    latency_ms = round(bot.latency * 1000) if hasattr(bot, "latency") and bot.latency is not None else 0
-    active_sessions = get_active_sessions_count()
-    total_completed, total_failed = get_realtime_quest_stats()
-
-    worst = max(cpu["percent"], ram["percent"], disk["percent"])
-    color = (discord.Color.from_rgb(87, 242, 135) if worst < 70
-             else discord.Color.from_rgb(254, 231, 92) if worst < 90
-             else discord.Color.from_rgb(237, 66, 69))
-
-    embed = discord.Embed(title="⚡ SYSTEM MONITOR", color=color, timestamp=discord.utils.utcnow())
-    if bot.user:
-        embed.set_author(name=f"{bot.user.name} • Realtime", icon_url=bot.user.display_avatar.url)
-        embed.set_thumbnail(url=bot.user.display_avatar.url)
-
-    embed.description = (
-        f"🟢 Online từ <t:{start_ts}:R> • Uptime `{exact_duration}`\n"
-        f"```yaml\n"
-        f"CPU : {make_bar(cpu['percent'])} {cpu['percent']}%\n"
-        f"RAM : {make_bar(ram['percent'])} {ram['percent']}%\n"
-        f"DISK: {make_bar(disk['percent'])} {disk['percent']}%\n"
-        f"```"
-    )
-
-    embed.add_field(name="📶 Ping", value=f"`{latency_ms} ms`", inline=True)
-    embed.add_field(name="👥 Phiên", value=f"`{active_sessions}`", inline=True)
-    embed.add_field(name="📦 RAM Bot", value=f"`{bot_ram_mb} MB`", inline=True)
-    embed.add_field(name="✅ Thành công", value=f"`{total_completed}`", inline=True)
-    embed.add_field(name="❌ Thất bại", value=f"`{total_failed}`", inline=True)
-    embed.add_field(name="🐍 Runtime", value=f"`Py {platform.python_version()}` • `dpy {discord.__version__ if discord else '2.x'}`", inline=True)
-    embed.add_field(name="🖥️ Máy chủ", value=f"`{get_os_info()}`\n`{cpu['model']}` • {cpu['cores']} nhân", inline=False)
-    embed.add_field(
-        name="💾 Bộ nhớ",
-        value=f"RAM `{ram['used_gb']}/{ram['total_gb']} GB` • Đĩa `{disk['used_gb']}/{disk['total_gb']} GB`",
-        inline=False
-    )
-
-    embed.set_footer(text=f"Cập nhật {datetime.now().strftime('%H:%M:%S')} • Chỉ bạn thấy tin này")
-    return embed
-
-
-class SystemStatsView(discord.ui.View):
-    """View cung cấp nút bấm Làm Mới (Refresh) dữ liệu thời gian thực."""
-    def __init__(self, bot, bot_start_time: float):
-        super().__init__(timeout=300) # Timeout 5 phút
-        self.bot = bot
-        self.bot_start_time = bot_start_time
-
-    @discord.ui.button(label="Làm Mới Số Liệu", style=discord.ButtonStyle.primary, emoji="🔄", custom_id="refresh_system_stats")
-    async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = build_system_embed(self.bot, self.bot_start_time)
-        await interaction.response.edit_message(embed=embed, view=self)
