@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import aiohttp
 import discord
@@ -6,7 +7,7 @@ import discord
 import config
 from txa_layout import (
     TxaView, box, row_of, btn, _resolve, MISSING, PACKAGE_EMOJI,
-    GREEN, YELLOW, ORANGE,
+    GREEN, YELLOW, ORANGE, RED,
 )
 from limits_manager import (
     get_active_transaction,
@@ -264,11 +265,16 @@ class InvoiceLayoutView(TxaView):
                 await asyncio.sleep(self.REFRESH_SECONDS)
                 if not self.live:
                     return
+                expire_ts = self.tx.get("created_at", 0) + get_transaction_timeout()
                 tx = get_active_transaction(self.user_id)
                 if not tx or tx.get("order_id") != self.order_id:
                     self.live = False
+                    if time.time() >= expire_ts:  # hóa đơn hết hạn (không phải đã thanh toán/hủy) -> báo hết hạn
+                        LIVE_INVOICES.pop(self.order_id, None)
+                        self._build_expired()
+                        if self._interaction:
+                            await self._interaction.edit_original_response(view=self)
                     return
-                expire_ts = self.tx.get("created_at", 0) + get_transaction_timeout()
                 rem = expire_ts - int(time.time())
                 if rem <= 0:
                     self.live = False

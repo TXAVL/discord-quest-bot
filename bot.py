@@ -99,7 +99,9 @@ async def handle_claim_reward_response(
     btn: discord.ui.Button = None,
     view: discord.ui.View = None
 ):
-    """Xử lý phản hồi từ API nhận quà Discord, xử lý chuyên sâu và hướng dẫn chi tiết khi dính Captcha."""
+    """Xử lý phản hồi từ API nhận quà Discord. Dính hCaptcha thì hướng dẫn nhận trực tiếp trên Discord (bot không vượt captcha)."""
+    from txa_layout import claim_result_view, QUEST_HOME_URL
+    uid = interaction.user.id
     is_captcha = (
         res.get("error") == "captcha_required"
         or res.get("captcha") is True
@@ -108,78 +110,41 @@ async def handle_claim_reward_response(
         or "captcha_key" in str(res.get("details", ""))
     )
 
-    if is_captcha:
-        embed = discord.Embed(
-            title="🛡️ Discord Yêu Cầu Xác Thực Captcha Khi Nhận Quà",
-            color=discord.Color.gold(),
-            timestamp=discord.utils.utcnow(),
-            description=(
-                f"Nhiệm vụ: **{quest_name}**\n\n"
-                f"🎉 **Tin vui:** Tiến trình nhiệm vụ của bạn đã hoàn thành **100%** thành công!\n\n"
-                f"🔒 **Lý do có thông báo này:**\n"
-                f"Discord áp dụng cơ chế xác minh chống bot (hCaptcha) khi tài khoản bấm nhận thưởng qua API tự động.\n\n"
-                f"🎁 **Cách nhận quà ngay trong 5 giây:**\n"
-                f"1️⃣ Mở ứng dụng **Discord** (trên máy tính hoặc điện thoại của bạn).\n"
-                f"2️⃣ Vào **Cài đặt người dùng (User Settings ⚙️)** ➔ **Kho quà tặng (Gift Inventory)** *(hoặc tab **Quests**)*.\n"
-                f"3️⃣ Bấm nút **Nhận Thưởng (Claim Reward)** trực tiếp tại đó.\n\n"
-                f"💡 *Nếu Discord hiện bảng chọn hình ảnh (hCaptcha), bạn chỉ cần chọn hình 1 lần là nhận ngay mã Gift Code hoặc trang trí tài khoản!*"
-            )
-        )
-        embed.set_footer(text="Quà tặng của bạn vẫn được lưu giữ 100% an toàn trên tài khoản Discord.")
-        if btn:
-            btn.label = "Nhận trên Discord ↗️"
-            btn.style = discord.ButtonStyle.secondary
-        await interaction.followup.send(embed=embed, ephemeral=True)
+    async def refresh_message():
         if view and interaction.message:
             try:
                 await interaction.message.edit(view=view)
             except Exception:
                 pass
+
+    if is_captcha:
+        # Thay nút nhận quà bằng nút dẫn thẳng tới trang Quest của Discord
+        if btn and view:
+            try:
+                row = btn.row
+                view.remove_item(btn)
+                view.add_item(discord.ui.Button(
+                    label="Nhận trên Discord", emoji="🎁", style=discord.ButtonStyle.link,
+                    url=QUEST_HOME_URL, row=row
+                ))
+            except Exception:
+                pass
+        await interaction.followup.send(view=claim_result_view(uid, "captcha", quest_name), ephemeral=True)
+        await refresh_message()
         return
 
     if "error" in res:
-        err_msg = res.get("details", res["error"])
-        await interaction.followup.send(
-            f"❌ **Không thể nhận quà từ Discord:**\n"
-            f"Nhiệm vụ: **{quest_name}**\n"
-            f"Chi tiết: `{err_msg[:300]}`",
-            ephemeral=True
-        )
+        detail = str(res.get("details", res["error"]))
+        await interaction.followup.send(view=claim_result_view(uid, "error", quest_name, detail=detail), ephemeral=True)
         return
 
     code = res.get("code")
-    if code:
-        embed = discord.Embed(
-            title="🎉 Nhận Quà Thành Công!",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow(),
-            description=(
-                f"Nhiệm vụ: **{quest_name}**\n\n"
-                f"🔑 **Mã quà tặng (Promo Code):**\n"
-                f"```\n{code}\n```\n"
-                f"💡 *Sao chép mã trên và kích hoạt trong Discord Gift Inventory hoặc trong game.*"
-            )
-        )
-    else:
-        embed = discord.Embed(
-            title="🎉 Nhận Quà Thành Công!",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow(),
-            description=(
-                f"Nhiệm vụ: **{quest_name}**\n\n"
-                f"✨ *Phần thưởng đã được kích hoạt trực tiếp vào tài khoản Discord của bạn!*"
-            )
-        )
     if btn:
         btn.disabled = True
         btn.label = f"Đã nhận: {quest_name[:14]}"
         btn.style = discord.ButtonStyle.secondary
-    await interaction.followup.send(embed=embed, ephemeral=True)
-    if view and interaction.message:
-        try:
-            await interaction.message.edit(view=view)
-        except Exception:
-            pass
+    await interaction.followup.send(view=claim_result_view(uid, "success", quest_name, code=code), ephemeral=True)
+    await refresh_message()
 
 
 class DMProgressView(discord.ui.View):
@@ -1275,6 +1240,12 @@ class QuestBot(commands.Bot):
     async def on_ready(self):
         log(f"Bot đăng nhập thành công với tên: {Colors.BOLD}{self.user}{Colors.RESET}", "ok")
         
+        try:
+            import txa_layout
+            txa_layout.configure(avatar=str(self.user.display_avatar.url), invite=get_bot_invite_url(self))
+        except Exception as e:
+            log(f"Không cấu hình được ảnh đại diện/link mời cho giao diện: {e}", "warn")
+
         # Dọn tin nhắn phiên của lần chạy trước (nút cũ không còn hoạt động)
         await session_msgs.purge_tracked(self)
 
@@ -1577,28 +1548,8 @@ def get_bot_invite_url(bot):
 # Slash Command: Get Bot Invite Link
 @bot.tree.command(name="invite", description="Lấy link mời Quest Bot vào máy chủ (Server) Discord của bạn")
 async def invite_bot(interaction: discord.Interaction):
-    invite_url = get_bot_invite_url(bot)
-    
-    embed = discord.Embed(
-        title="➕ Thêm Quest Bot Vào Server Của Bạn",
-        description=(
-            "Nhấn nút bên dưới để mời Bot tham gia máy chủ Discord của bạn.\n\n"
-            "✨ **Khi Bot tham gia Server mới:**\n"
-            "• Bot sẽ tự động tìm kênh và tạo **Bảng điều khiển** tự động.\n"
-            "• Admin có thể dùng lệnh `/setup_here` tại bất kỳ kênh nào để đổi kênh hoạt động."
-        ),
-        color=discord.Color.blue()
-    )
-    
-    view = discord.ui.View()
-    view.add_item(discord.ui.Button(
-        label="Mời Bot Vào Server",
-        style=discord.ButtonStyle.link,
-        url=invite_url,
-        emoji="➕"
-    ))
-    
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    from txa_layout import invite_view
+    await interaction.response.send_message(view=invite_view(interaction.user.id), ephemeral=True)
 
 
 def is_admin_or_owner(interaction: discord.Interaction) -> bool:
@@ -1784,7 +1735,8 @@ async def set_limit_command(interaction: discord.Interaction, user_discord_id: s
     embed.add_field(name="🔁 Thay đổi", value=f"`{balance - old_balance:+d}`", inline=True)
     embed.set_footer(text="/set_limit đặt số tuyệt đối • /add_balance để cộng thêm")
 
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    from txa_layout import embed_to_view
+    await interaction.response.send_message(view=embed_to_view(embed, interaction.user.id), ephemeral=True)
 
 
 @set_limit_command.autocomplete("user_discord_id")
@@ -2199,11 +2151,17 @@ async def set_price(interaction: discord.Interaction, price: int):
     from limits_manager import set_price_per_quest
     set_price_per_quest(price)
     
-    await interaction.response.send_message(
-        f"✅ **Đã cập nhật đơn giá thành công!**\n"
-        f"Đơn giá mới: **{price:,} VNĐ** cho mỗi lượt làm quest.",
-        ephemeral=True
+    from txa_layout import text_card
+    from limits_manager import PACKAGES, get_package_info
+    table = "\n".join(
+        f"• **{q} lượt** — {get_package_info(q)['final']:,}đ" + (f" `-{get_package_info(q)['pct']}%`" if get_package_info(q)['pct'] else "")
+        for q in PACKAGES
     )
+    await interaction.response.send_message(view=text_card(
+        interaction.user.id, "✅ Đã Cập Nhật Đơn Giá",
+        f"Đơn giá mới: **{price:,} VNĐ** / lượt.\n\n**🎁 Ưu đãi mới (vừa quay ngẫu nhiên):**\n{table}",
+        footer="Đổi giá sẽ tự quay lại mức giảm của các gói"
+    ), ephemeral=True)
 
 
 # Command: Admin set transaction timeout (slash command)
@@ -2223,11 +2181,12 @@ async def set_timeout(interaction: discord.Interaction, minutes: int):
     seconds = minutes * 60
     set_transaction_timeout(seconds)
     
-    await interaction.response.send_message(
-        f"✅ **Đã cập nhật thời hạn giao dịch thành công!**\n"
-        f"Mã QR hóa đơn sẽ hết hạn sau: **{minutes:02d} phút** ({seconds:02d} giây).",
-        ephemeral=True
-    )
+    from txa_layout import text_card
+    await interaction.response.send_message(view=text_card(
+        interaction.user.id, "✅ Đã Cập Nhật Thời Hạn Hóa Đơn",
+        f"Mã QR hóa đơn sẽ hết hạn sau **{minutes} phút** ({seconds} giây).",
+        footer="Áp dụng cho các hóa đơn tạo từ bây giờ"
+    ), ephemeral=True)
 
 
 # Command: Buy quest turns (slash command)
@@ -2302,7 +2261,8 @@ async def add_balance_command(interaction: discord.Interaction, user_discord_id:
     embed.add_field(name="📈 Sau", value=f"`{new_balance:02d} lượt`", inline=True)
     embed.add_field(name="🔁 Thay đổi", value=f"`{new_balance - old_balance:+d}`", inline=True)
     embed.set_footer(text="/add_balance cộng dồn • /set_limit để đặt số tuyệt đối")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    from txa_layout import embed_to_view
+    await interaction.response.send_message(view=embed_to_view(embed, interaction.user.id), ephemeral=True)
 
 
 @add_balance_command.autocomplete("user_discord_id")

@@ -30,10 +30,55 @@ PACKAGE_EMOJI = {1: "💎", 2: "🎫", 5: "🔥", 10: "👑", 20: "🚀", 50: "�
 
 # ───────────────────────── Khối dựng chung ─────────────────────────
 
-def box(*items, accent=ACCENT) -> discord.ui.Container:
-    """Tạo khung nội dung. Chuỗi thường -> TextDisplay, "---" -> đường kẻ, None -> bỏ qua."""
+BOT_AVATAR = None   # ảnh đại diện bot, gán lúc khởi động (configure)
+INVITE_URL = None   # link mời bot, gán lúc khởi động (configure)
+QUEST_HOME_URL = "https://discord.com/quest-home"
+
+
+def configure(avatar: str = None, invite: str = None):
+    global BOT_AVATAR, INVITE_URL
+    if avatar:
+        BOT_AVATAR = avatar
+    if invite:
+        INVITE_URL = invite
+
+
+def link_buttons(*which) -> list:
+    """Các nút link dùng chung: 'invite' (mời bot), 'quest' (trang Quest), 'discord' (Discord Web)."""
+    out = []
+    for w in which:
+        if w == "invite" and INVITE_URL:
+            out.append(discord.ui.Button(label="Mời Bot", emoji="➕", style=discord.ButtonStyle.link, url=INVITE_URL))
+        elif w == "quest":
+            out.append(discord.ui.Button(label="Trang Quest", emoji="🎁", style=discord.ButtonStyle.link, url=QUEST_HOME_URL))
+        elif w == "discord":
+            out.append(discord.ui.Button(label="Discord Web", emoji="💬", style=discord.ButtonStyle.link, url="https://discord.com/app"))
+    return out
+
+
+def _with_hero(items: list) -> list:
+    """Ghép tiêu đề '### ...' (+ dòng mô tả ngay sau nó) thành một Section có ảnh đại diện bot bên phải."""
+    if not BOT_AVATAR or not items or not isinstance(items[0], str) or not items[0].startswith("### "):
+        return items
+    items = list(items)
+    texts = [items[0]]
+    for j in range(1, len(items)):
+        it = items[j]
+        if it is None:
+            continue
+        if isinstance(it, str) and it != "---" and not it.startswith("```") and len(it) < 600:
+            texts.append(it)
+            del items[j]
+        break
+    items[0] = discord.ui.Section(*texts, accessory=discord.ui.Thumbnail(BOT_AVATAR))
+    return items
+
+
+def box(*items, accent=ACCENT, hero: bool = True) -> discord.ui.Container:
+    """Tạo khung nội dung. Chuỗi thường -> TextDisplay, "---" -> đường kẻ, None -> bỏ qua.
+    Tiêu đề đầu khung tự có ảnh đại diện bot (hero=False để tắt)."""
     c = discord.ui.Container(accent_colour=accent)
-    for it in items:
+    for it in (_with_hero(list(items)) if hero else items):
         if it is None:
             continue
         if isinstance(it, str):
@@ -827,6 +872,7 @@ class HelpLayoutView(TxaView):
             btn("Tải Tiện Ích", "📦", open_ext, style=discord.ButtonStyle.primary),
             btn("Mua Lượt", "💳", open_buy, style=discord.ButtonStyle.success),
         ]
+        buttons += link_buttons("invite", "quest")
         self.add_item(row_of(*buttons))
 
 
@@ -888,6 +934,101 @@ class ExtensionGuideView(TxaView):
             btn("edge://extensions", "🧭", edge),
             discord.ui.Button(label="Mở Discord Web", emoji="💬", style=discord.ButtonStyle.link, url="https://discord.com/app"),
         ))
+
+
+# ───────────────────────── Kết quả nhận quà quest ─────────────────────────
+
+def claim_result_view(user_id: int, kind: str, quest_name: str, code: str = None, detail: str = None) -> TxaView:
+    """Màn hình kết quả khi bấm nhận quà: kind = 'success' | 'captcha' | 'error'."""
+    view = TxaView(user_id, timeout=600)
+    link_row = row_of(
+        discord.ui.Button(label="Mở trang Quest", emoji="🎁", style=discord.ButtonStyle.link, url=QUEST_HOME_URL),
+        discord.ui.Button(label="Mở Discord Web", emoji="💬", style=discord.ButtonStyle.link, url="https://discord.com/app"),
+    )
+    if kind == "success":
+        body = (f"🔑 **Mã quà tặng (Promo Code):**\n```\n{code}\n```\n💡 Sao chép mã trên rồi kích hoạt trong **Gift Inventory** hoặc trong game."
+                if code else "✨ Phần thưởng đã được kích hoạt trực tiếp vào tài khoản Discord của bạn!")
+        view.add_item(box("### 🎉 Nhận Quà Thành Công!", f"🎯 **Nhiệm vụ:** {quest_name}", "---", body, accent=GREEN))
+    elif kind == "captcha":
+        view.add_item(box(
+            "### 🛡️ Cần Bạn Bấm Nhận Trên Discord",
+            f"🎯 **Nhiệm vụ:** {quest_name}\n🎉 Tiến độ đã hoàn thành **100%** — quà vẫn nằm an toàn trên tài khoản của bạn.",
+            "---",
+            "**❓ Vì sao bot không tự nhận được?**\n"
+            "Khi nhận thưởng, Discord bắt buộc **xác minh hCaptcha** (chống bot). Đây là bước chỉ người thật mới làm được — "
+            "bot **không thể và không được phép** vượt qua nó, nên nút nhận quà phải bấm thủ công **một lần duy nhất** trên Discord.",
+            "---",
+            "**⚡ Nhận quà trong 10 giây**\n"
+            "1️⃣ Bấm **Mở trang Quest** bên dưới (hoặc mở Discord → **Quests**).\n"
+            "2️⃣ Tìm nhiệm vụ vừa xong → bấm **Nhận Thưởng (Claim Reward)**.\n"
+            "3️⃣ Nếu hiện bảng chọn hình, chọn đúng 1 lần là nhận ngay mã hoặc vật phẩm.",
+            "-# 💡 Nếu không thấy nút Nhận Thưởng: vào User Settings → Gift Inventory.",
+            accent=YELLOW,
+        ))
+        view.add_item(link_row)
+        return view
+    else:
+        view.add_item(box(
+            "### ❌ Không Thể Nhận Quà",
+            f"🎯 **Nhiệm vụ:** {quest_name}",
+            f"```\n{(detail or 'Lỗi không xác định')[:500]}\n```",
+            "Hãy thử lại sau ít phút, hoặc nhận trực tiếp trên Discord.",
+            accent=RED,
+        ))
+    view.add_item(link_row)
+    return view
+
+
+# ───────────────────────── Thẻ kết quả chung ─────────────────────────
+
+def text_card(user_id: int, title: str, body: str, accent=GREEN, footer: str = None, links=()) -> TxaView:
+    view = TxaView(user_id, timeout=300)
+    view.add_item(box(f"### {title}", body, f"-# {footer}" if footer else None, accent=accent))
+    btns = link_buttons(*links)
+    if btns:
+        view.add_item(row_of(*btns))
+    return view
+
+
+def embed_to_view(embed: discord.Embed, user_id: int, links=()) -> TxaView:
+    """Chuyển một embed cũ thành thẻ Components V2 (giữ tiêu đề, mô tả, các trường, chân trang và màu)."""
+    lines = []
+    for f in embed.fields:
+        lines.append(f"**{f.name}**\n{f.value}")
+    accent = embed.color if embed.color else ACCENT
+    footer = embed.footer.text if embed.footer and embed.footer.text else None
+    view = TxaView(user_id, timeout=300)
+    view.add_item(box(
+        f"### {embed.title or 'Thông báo'}",
+        embed.description or None,
+        "---" if lines and embed.description else None,
+        "\n\n".join(lines) if lines else None,
+        f"-# {footer}" if footer else None,
+        accent=accent,
+    ))
+    btns = link_buttons(*links)
+    if btns:
+        view.add_item(row_of(*btns))
+    return view
+
+
+def invite_view(user_id: int) -> TxaView:
+    view = TxaView(user_id, timeout=300)
+    view.add_item(box(
+        "### ➕ Thêm Quest Bot Vào Server Của Bạn",
+        "Nhấn nút **Mời Bot** bên dưới để đưa bot vào máy chủ Discord của bạn.",
+        "---",
+        "**✨ Khi bot tham gia server mới**\n"
+        "• Bot tự tìm kênh phù hợp và tạo **Bảng điều khiển**.\n"
+        "• Admin dùng `/setup_here` ở bất kỳ kênh nào để đổi kênh hoạt động.\n"
+        "• Mọi người có thể dùng `/help` để xem toàn bộ lệnh.",
+        "-# Bot chỉ xin quyền cần thiết để gửi tin nhắn và tạo bảng điều khiển.",
+        accent=ACCENT,
+    ))
+    btns = link_buttons("invite", "quest", "discord")
+    if btns:
+        view.add_item(row_of(*btns))
+    return view
 
 
 # ───────────────────────── Menu trung tâm (/menu) ─────────────────────────

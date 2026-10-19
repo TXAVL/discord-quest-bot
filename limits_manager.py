@@ -163,7 +163,7 @@ def get_package_info(qty: int) -> dict:
     price = get_price_per_quest()
     pct = int(get_discounts().get(str(qty), 0))
     original = price * qty
-    final = max(100, int(round(original * (100 - pct) / 100 / 100.0)) * 100)
+    final = max(100, int(original * (100 - pct) / 100 / 100.0 + 0.5) * 100)
     return {"qty": qty, "pct": pct, "original": original, "final": final, "saved": original - final}
 
 def create_transaction(user_id: int, quests: int) -> Optional[dict]:
