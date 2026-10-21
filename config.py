@@ -49,9 +49,9 @@ EMOJI_ROCKET = os.getenv("EMOJI_ROCKET", "🚀")
 
 # Cấu hình SePay & Thanh Toán MB Bank
 SEPAY_API_KEY = os.getenv("SEPAY_API_KEY", "")
-BANK_ID = "MB"
-ACCOUNT_NO = "2211231106"
-ACCOUNT_NAME = "TANG XUAN ANH"
+BANK_ID = os.getenv("BANK_ID", "MB")
+ACCOUNT_NO = os.getenv("ACCOUNT_NO", "2211231106")
+ACCOUNT_NAME = os.getenv("ACCOUNT_NAME", "TANG XUAN ANH")
 
 SUPPORTED_TASKS = [
     "WATCH_VIDEO",

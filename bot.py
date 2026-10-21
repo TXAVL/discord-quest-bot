@@ -1261,6 +1261,9 @@ class QuestBot(commands.Bot):
         except Exception as e:
             log(f"Không cấu hình được ảnh đại diện/link mời cho giao diện: {e}", "warn")
 
+        from emoji_sync import sync_application_emojis
+        await sync_application_emojis(self)
+
         # Dọn tin nhắn phiên của lần chạy trước (nút cũ không còn hoạt động)
         await session_msgs.purge_tracked(self)
 

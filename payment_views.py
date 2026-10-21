@@ -30,9 +30,10 @@ AUTO_CHECK_INTERVAL = 6
 
 
 def qr_url(order_id: str, amount: int) -> str:
+    holder = config.ACCOUNT_NAME.replace(' ', '%20')
     return (
-        f"https://img.vietqr.io/image/{config.BANK_ID}-{config.ACCOUNT_NO}-compact.png"
-        f"?amount={amount}&addInfo={order_id}&accountName={config.ACCOUNT_NAME.replace(' ', '%20')}"
+        f"https://qr.sepay.vn/img?bank={config.BANK_ID}&acc={config.ACCOUNT_NO}"
+        f"&template=compact&amount={amount}&des={order_id}&holder={holder}"
     )
 
 
@@ -47,7 +48,7 @@ def build_success_view(tx: dict, user_id: int, auto: bool) -> TxaView:
     info = get_user_quota_info(user_id)
     view = TxaView(user_id, timeout=60)
     view.add_item(box(
-        "### 🎉 THANH TOÁN THÀNH CÔNG!",
+        f"### 🎉 THANH TOÁN THÀNH CÔNG! {config.EMOJI_SUCCESS}",
         f"{config.EMOJI_SUCCESS} **Hệ thống đã nhận được tiền!**\n"
         f"{'⚡ Hệ thống đã **tự động phát hiện** chuyển khoản của bạn.' if auto else 'Đã xác thực giao dịch chuyển khoản thành công từ ngân hàng.'}",
         "---",
@@ -129,7 +130,7 @@ class PackageSelect(discord.ui.Select):
 
         loading = TxaView(user_id, timeout=60)
         loading.add_item(box(
-            "### ⚙️ Đang Khởi Tạo Giao Dịch",
+            f"### {config.EMOJI_LOADING} Đang Khởi Tạo Giao Dịch",
             f"{config.EMOJI_LOADING} Hệ thống đang tạo mã đơn hàng và mã VietQR thanh toán, vui lòng đợi...",
         ))
         await interaction.response.edit_message(view=loading)
@@ -178,7 +179,7 @@ class ShopLayoutView(TxaView):
         row = discord.ui.ActionRow()
         row.add_item(PackageSelect(self))
         self.add_item(box(
-            "### 💎 Cửa Hàng Lượt Quest & Số Dư",
+            f"### 💎 Cửa Hàng Lượt Quest & Số Dư {config.EMOJI_ROCKET}",
             f"{config.EMOJI_ROCKET} Mua thêm lượt làm Quest tự động, không cần thao tác tay.",
             f"👤 <@{self.user_id}>\n💎 Lượt hiện có: **{info['quota_str']}**\n🏆 Đã hoàn thành: `{info['total_completed']:02d} nhiệm vụ`",
             "---",
@@ -295,7 +296,7 @@ class InvoiceLayoutView(TxaView):
     def _build_expired(self):
         self.clear_items()
         self.add_item(box(
-            "### ⌛ Hóa Đơn Đã Hết Hạn",
+            f"### ⌛ Hóa Đơn Đã Hết Hạn {config.EMOJI_FAIL}",
             f"Mã đơn hàng `{self.order_id}` đã vượt quá thời hạn thanh toán ({get_transaction_timeout() // 60:02d} phút).",
             "Mã QR này không còn hiệu lực. Vui lòng quay lại cửa hàng để chọn gói và tạo đơn mới.",
             accent=RED,
@@ -312,12 +313,17 @@ class InvoiceLayoutView(TxaView):
         expire_ts = self.tx["created_at"] + get_transaction_timeout()
         rem = max(0, expire_ts - int(time.time()))
         rem_m, rem_s = divmod(rem, 60)
-        deadline = f"`{rem_m:02d}:{rem_s:02d}` (hết hạn lúc <t:{expire_ts}:T>)"
+        total = max(1, get_transaction_timeout())
+        filled = round(10 * rem / total)
+        bar = "🟩" * filled + "⬛" * (10 - filled) if rem > total * 0.3 else "🟥" * filled + "⬛" * (10 - filled)
+        deadline = f"`{rem_m:02d}:{rem_s:02d}` (hết hạn lúc <t:{expire_ts}:T>)\n{bar}"
         discount = f" • giảm {pkg['pct']:02d}%" if pkg["pct"] else ""
+        url = qr_url(self.order_id, self.amount)
         self.add_item(box(
-            "### 💳 Hóa Đơn Chuyển Khoản Mua Lượt Quest",
-            "Quét mã VietQR bên dưới — app ngân hàng sẽ tự điền đúng số tài khoản, số tiền và nội dung.",
-            f"⏳ **Thời hạn thanh toán:** {deadline}",
+            f"### 💳 Hóa Đơn Chuyển Khoản Mua Lượt Quest {config.EMOJI_LOADING}",
+            "Quét mã VietQR bên dưới — app ngân hàng sẽ tự điền đúng số tài khoản, số tiền và nội dung.\n"
+            f"🔗 *Hoặc [bấm vào đây để mở ảnh QR cỡ lớn]({url})*",
+            f"{config.EMOJI_LOADING} **Đang chờ thanh toán • còn lại:** {deadline}",
             "---",
             f"🏦 **Ngân hàng:** {config.BANK_ID} (Quân Đội)\n"
             f"🔢 **Số tài khoản:** `{config.ACCOUNT_NO}`\n"
@@ -325,7 +331,7 @@ class InvoiceLayoutView(TxaView):
             f"💰 **Số tiền:** `{self.amount:,} VNĐ`\n"
             f"📝 **Nội dung CK:** `{self.order_id}`\n"
             f"📦 **Gói mua:** +{self.quantity:02d} lượt làm quest{discount}",
-            discord.ui.MediaGallery(discord.MediaGalleryItem(qr_url(self.order_id, self.amount))),
+            discord.ui.MediaGallery(discord.MediaGalleryItem(url, description=f"VietQR {self.order_id}")),
             "---",
             f"💎 Số dư hiện có: **{info['quota_str']}** • Đã hoàn thành: `{info['total_completed']:02d}`",
             f"-# 🔄 Hệ thống tự động kiểm tra mỗi {AUTO_CHECK_INTERVAL:02d} giây — chuyển khoản xong chỉ cần đợi, "
@@ -333,8 +339,10 @@ class InvoiceLayoutView(TxaView):
             accent=YELLOW,
         ))
         items = [
-            btn("Kiểm Tra Ngay", "✅", self._check, style=discord.ButtonStyle.success),
-            btn("Hủy Giao Dịch", "❌", self._cancel, style=discord.ButtonStyle.danger),
+            btn("Kiểm Tra Ngay", config.EMOJI_SUCCESS, self._check, style=discord.ButtonStyle.success),
+            btn("Hủy Giao Dịch", config.EMOJI_FAIL, self._cancel, style=discord.ButtonStyle.danger),
+            btn("Sao Chép", "📋", self._copy),
+            discord.ui.Button(label="Mở Ảnh QR", emoji="💳", style=discord.ButtonStyle.link, url=url),
         ]
         if self.back:
             items.append(btn("Quay lại", "◀️", self._leave))
@@ -367,6 +375,16 @@ class InvoiceLayoutView(TxaView):
             f"⏳ **Chưa thấy tiền về.**\n"
             f"Chưa quét thấy giao dịch nội dung `{self.order_id}` (**{self.amount:,}đ**).\n"
             f"💡 Không cần bấm lại — hệ thống **tự động kiểm tra mỗi {AUTO_CHECK_INTERVAL:02d}s** và sẽ cộng lượt ngay khi tiền về.",
+            ephemeral=True
+        )
+
+    async def _copy(self, interaction: discord.Interaction):
+        """Gửi riêng thông tin chuyển khoản dạng văn bản để bấm giữ sao chép trên điện thoại."""
+        await interaction.response.send_message(
+            f"📋 **Thông tin chuyển khoản** (bấm giữ để sao chép)\n"
+            f"Số tài khoản:\n```{config.ACCOUNT_NO}```"
+            f"Số tiền:\n```{self.amount}```"
+            f"Nội dung (bắt buộc đúng):\n```{self.order_id}```",
             ephemeral=True
         )
 
