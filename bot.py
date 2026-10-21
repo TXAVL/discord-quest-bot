@@ -230,7 +230,7 @@ class DMProgressView(discord.ui.View):
         async def callback(interaction: discord.Interaction):
             await interaction.response.defer(ephemeral=True)
             if not self.completer:
-                await interaction.followup.send("❌ Không tìm thấy thông tin phiên làm quest.", ephemeral=True)
+                await interaction.followup.send(f"{config.EMOJI_FAIL} Không tìm thấy thông tin phiên làm quest.", ephemeral=True)
                 return
 
             target_btn = None
@@ -254,7 +254,7 @@ class AdminSessionControlView(discord.ui.View):
     @discord.ui.button(label="Dừng Phiên Này", style=discord.ButtonStyle.danger, emoji="🛑", custom_id=None)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id not in config.ADMIN_IDS:
-            await interaction.response.send_message("❌ Bạn không phải Admin.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Bạn không phải Admin.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -360,14 +360,14 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
         import re
         user_token = self.token_input.value.strip().strip('"').strip("'").strip()
         if not user_token:
-            await interaction.followup.send("❌ Token không được để trống!", ephemeral=True)
+            await interaction.followup.send(f"{config.EMOJI_FAIL} Token không được để trống!", ephemeral=True)
             return
 
         # Validate token format: MFA or Standard 3-part base64 token
         token_pattern = r"^(mfa\.[A-Za-z0-9_\-\=]+|[A-Za-z0-9_\-\=]+\.[A-Za-z0-9_\-\=]+\.[A-Za-z0-9_\-\=]+)$"
         if not re.match(token_pattern, user_token):
             await interaction.followup.send(
-                "❌ **Định dạng Token không đúng quy chuẩn!**\n"
+                f"{config.EMOJI_FAIL} **Định dạng Token không đúng quy chuẩn!**\n"
                 "Discord User Token hợp lệ phải thuộc một trong hai dạng:\n"
                 "1. Token chuẩn 3 phần cách nhau bằng dấu chấm (ví dụ: `MTI... .xxx... .yyy...`)\n"
                 "2. Token MFA bắt đầu bằng `mfa.` (ví dụ: `mfa.xxx...`)\n"
@@ -393,7 +393,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
         user_info = await api.validate_token()
         if not user_info:
             await interaction.followup.send(
-                "❌ **Token không hợp lệ hoặc không thể kết nối tới Discord!**\n"
+                f"{config.EMOJI_FAIL} **Token không hợp lệ hoặc không thể kết nối tới Discord!**\n"
                 "Vui lòng kiểm tra lại token của bạn hoặc lấy token mới theo hướng dẫn.",
                 ephemeral=True
             )
@@ -417,7 +417,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
             dm_channel = await interaction.user.create_dm()
         except Exception as e:
             await interaction.followup.send(
-                "❌ **Không thể gửi tin nhắn riêng cho bạn!**\n"
+                f"{config.EMOJI_FAIL} **Không thể gửi tin nhắn riêng cho bạn!**\n"
                 "Vui lòng bật quyền nhận tin nhắn riêng (DM) từ thành viên máy chủ để nhận tiến độ.",
                 ephemeral=True
             )
@@ -449,7 +449,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
             dm_msg = session_msgs.track(await dm_channel.send(embed=embed, view=view))
         except Exception as e:
             await interaction.followup.send(
-                "❌ **Không thể gửi DM cho bạn!** Vui lòng mở khóa DM từ người lạ trong cài đặt bảo mật.",
+                f"{config.EMOJI_FAIL} **Không thể gửi DM cho bạn!** Vui lòng mở khóa DM từ người lạ trong cài đặt bảo mật.",
                 ephemeral=True
             )
             return
@@ -712,7 +712,7 @@ class TokenModal(discord.ui.Modal, title="🚀 Bắt đầu Quest Auto-Completer
 
                         if is_completed(q):
                             if claimed:
-                                quest_lines.append(f"✅ ~~{q_name}~~ `(Đã nhận)`")
+                                quest_lines.append(f"{config.EMOJI_SUCCESS} ~~{q_name}~~ `(Đã nhận)`")
                             else:
                                 quest_lines.append(f"🎁 **{q_name}** `[Chờ nhận quà]`")
                         elif completer and completer.current_quest_id == q_id:
@@ -894,11 +894,11 @@ class SessionDetailsView(discord.ui.View):
     def make_claim_callback(self, qid, qname, btn):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.user_id:
-                await interaction.response.send_message("❌ Nút bấm này không dành cho bạn.", ephemeral=True)
+                await interaction.response.send_message(f"{config.EMOJI_FAIL} Nút bấm này không dành cho bạn.", ephemeral=True)
                 return
             await interaction.response.defer(ephemeral=True)
             if not self.completer:
-                await interaction.followup.send("❌ Phiên đã kết thúc, không thể gửi yêu cầu nhận quà.", ephemeral=True)
+                await interaction.followup.send(f"{config.EMOJI_FAIL} Phiên đã kết thúc, không thể gửi yêu cầu nhận quà.", ephemeral=True)
                 return
             res = await self.completer.claim_reward(qid)
             await handle_claim_reward_response(res, qname, interaction, btn, self)
@@ -906,7 +906,7 @@ class SessionDetailsView(discord.ui.View):
 
     async def refresh_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Bạn không có quyền thao tác trên bảng này.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Bạn không có quyền thao tác trên bảng này.", ephemeral=True)
             return
         await interaction.response.defer()
         embed, view = await build_session_details_response(self.user_id, interaction.user, self.bot_instance)
@@ -914,7 +914,7 @@ class SessionDetailsView(discord.ui.View):
 
     async def stop_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Bạn không có quyền dừng phiên của người khác.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Bạn không có quyền dừng phiên của người khác.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         info = config.ACTIVE_USERS.pop(self.user_id, None)
@@ -946,7 +946,7 @@ class IdleDetailsView(discord.ui.View):
     @discord.ui.button(label="Làm Mới", style=discord.ButtonStyle.secondary, emoji="🔄", row=0)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Bạn không có quyền thao tác trên bảng này.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Bạn không có quyền thao tác trên bảng này.", ephemeral=True)
             return
         await interaction.response.defer()
         embed, view = await build_session_details_response(self.user_id, interaction.user, self.bot_instance)
@@ -955,7 +955,7 @@ class IdleDetailsView(discord.ui.View):
     @discord.ui.button(label="Mua Lượt (VietQR)", style=discord.ButtonStyle.success, emoji="💳", row=0)
     async def buy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Nút này không dành cho bạn.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Nút này không dành cho bạn.", ephemeral=True)
             return
         from payment_views import get_limit_embed_and_view, register_invoice
         _, view = get_limit_embed_and_view(self.user_id)
@@ -994,7 +994,7 @@ async def build_session_details_response(user_id: int, discord_user: discord.Use
         if quota['is_admin'] and getattr(config, "ADMIN_BYPASS_LIMIT", True):
             free_status = "♾️ Vô hạn (Admin không bị trừ lượt)"
         else:
-            free_status = "✅ Còn 01 lượt (Làm miễn phí ngay hôm nay)" if quota['free_available'] else "❌ Đã dùng hết hôm nay (Hệ thống reset lúc 00:00)"
+            free_status = f"{config.EMOJI_SUCCESS} Còn 01 lượt (Làm miễn phí ngay hôm nay)" if quota['free_available'] else f"{config.EMOJI_FAIL} Đã dùng hết hôm nay (Hệ thống reset lúc 00:00)"
         embed.add_field(
             name="💎 Hạn Mức & Số Dư Làm Quest",
             value=(
@@ -1117,7 +1117,7 @@ async def build_session_details_response(user_id: int, discord_user: discord.Use
 
         if is_completed(q):
             if claimed:
-                completed_lines.append(f"✅ ~~{name}~~ `(Đã nhận quà)`")
+                completed_lines.append(f"{config.EMOJI_SUCCESS} ~~{name}~~ `(Đã nhận quà)`")
             else:
                 completed_lines.append(f"🎁 **{name}** `[Chờ nhận quà - Nhấn nút dưới]`")
                 unclaimed_quests[qid] = name
@@ -1163,7 +1163,7 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="Bắt Đầu", style=discord.ButtonStyle.success, emoji="🚀", custom_id="btn_start")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_panel_channel(interaction):
-            await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
 
         from limits_manager import is_user_limited
@@ -1180,7 +1180,7 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="Chi Tiết", style=discord.ButtonStyle.secondary, emoji="📋", custom_id="btn_details")
     async def details_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_panel_channel(interaction):
-            await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -1190,7 +1190,7 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="Số Dư Quest", style=discord.ButtonStyle.primary, emoji="💎", custom_id="btn_quota")
     async def quota_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_panel_channel(interaction):
-            await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
 
         from payment_views import get_limit_embed_and_view, register_invoice
@@ -1201,7 +1201,7 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="Hướng Dẫn", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="btn_guide")
     async def guide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_panel_channel(interaction):
-            await interaction.response.send_message("❌ Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Nút bấm này không thể sử dụng ở kênh này.", ephemeral=True)
             return
         
         await send_extension_guide(interaction)
@@ -1420,7 +1420,7 @@ class QuestBot(commands.Bot):
                 embed.add_field(name="👤 Phiên tại server này", value=f"```\n{active_count:02d}\n```", inline=True)
                 embed.add_field(name="⏳ Hàng chờ", value="```\n00\n```", inline=True)
                 embed.add_field(name="▶️ Đang chạy", value=f"```\n{active_count:02d}\n```", inline=True)
-                embed.add_field(name="✅ Quest đã hoàn thành tại server này", value=f"```\n{get_guild_completed(guild_id):02d}\n```", inline=False)
+                embed.add_field(name=f"{config.EMOJI_SUCCESS} Quest đã hoàn thành tại server này", value=f"```\n{get_guild_completed(guild_id):02d}\n```", inline=False)
 
                 current_time = time.strftime("%H:%M %d/%m/%y")
                 embed.set_footer(text=f"Auto Scan • Auto Accept • Auto Complete • {current_time} | Quest Bot v4.0 - Built by TXA")
@@ -1469,9 +1469,9 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     log(f"Lỗi lệnh slash [{interaction.command.name if interaction.command else 'Unknown'}]: {error}", "error")
     
     if isinstance(error, app_commands.TransformerError):
-        msg = f"❌ **Lỗi dữ liệu kênh/tham số:** `{error.value}` không phải là kênh hợp lệ hoặc không thể sử dụng cho lệnh này."
+        msg = f"{config.EMOJI_FAIL} **Lỗi dữ liệu kênh/tham số:** `{error.value}` không phải là kênh hợp lệ hoặc không thể sử dụng cho lệnh này."
     else:
-        msg = f"❌ **Có lỗi xảy ra khi thực hiện lệnh:** `{error}`"
+        msg = f"{config.EMOJI_FAIL} **Có lỗi xảy ra khi thực hiện lệnh:** `{error}`"
 
     try:
         if interaction.response.is_done():
@@ -1495,7 +1495,7 @@ async def set_channel(
 ):
     # Verify Admin permission
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -1503,7 +1503,7 @@ async def set_channel(
     channel = target_channel or interaction.channel
 
     if not channel or not hasattr(channel, "send"):
-        await interaction.followup.send("❌ **Không thể xác định kênh văn bản hợp lệ!** Vui lòng thực hiện lệnh trong một kênh chat chữ.", ephemeral=True)
+        await interaction.followup.send(f"{config.EMOJI_FAIL} **Không thể xác định kênh văn bản hợp lệ!** Vui lòng thực hiện lệnh trong một kênh chat chữ.", ephemeral=True)
         return
 
     # Check bot permissions in target channel
@@ -1511,7 +1511,7 @@ async def set_channel(
     has_perms, missing_str = check_bot_channel_permissions(channel, me)
     if not has_perms:
         await interaction.followup.send(
-            f"❌ **Bot không có đủ quyền hạn tại kênh {getattr(channel, 'mention', channel.name)}!**\n\n"
+            f"{config.EMOJI_FAIL} **Bot không có đủ quyền hạn tại kênh {getattr(channel, 'mention', channel.name)}!**\n\n"
             f"Vui lòng vào **Cài đặt kênh ➔ Quyền (Permissions)** và cấp cho Bot/Vai trò của Bot các quyền sau:\n"
             f"{missing_str}",
             ephemeral=True
@@ -1526,7 +1526,7 @@ async def set_channel(
     await bot.update_control_panel(target_channel=channel)
 
     channel_mention = getattr(channel, "mention", f"<#{channel.id}>")
-    await interaction.followup.send(f"✅ **Đã thiết lập kênh hoạt động thành công tại:** {channel_mention}", ephemeral=True)
+    await interaction.followup.send(f"{config.EMOJI_SUCCESS} **Đã thiết lập kênh hoạt động thành công tại:** {channel_mention}", ephemeral=True)
 
 
 # Slash Command: Quick Setup in Current Channel
@@ -1535,14 +1535,14 @@ async def set_channel(
 async def setup_here(interaction: discord.Interaction):
     # Verify Admin permission
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
 
     target_channel = interaction.channel
     if not target_channel or not hasattr(target_channel, "send"):
-        await interaction.followup.send("❌ **Kênh hiện tại không hỗ trợ gửi tin nhắn!**", ephemeral=True)
+        await interaction.followup.send(f"{config.EMOJI_FAIL} **Kênh hiện tại không hỗ trợ gửi tin nhắn!**", ephemeral=True)
         return
 
     # Check bot permissions in target channel
@@ -1550,7 +1550,7 @@ async def setup_here(interaction: discord.Interaction):
     has_perms, missing_str = check_bot_channel_permissions(target_channel, me)
     if not has_perms:
         await interaction.followup.send(
-            f"❌ **Bot không có đủ quyền hạn tại kênh {getattr(target_channel, 'mention', target_channel.name)}!**\n\n"
+            f"{config.EMOJI_FAIL} **Bot không có đủ quyền hạn tại kênh {getattr(target_channel, 'mention', target_channel.name)}!**\n\n"
             f"Vui lòng vào **Cài đặt kênh ➔ Quyền (Permissions)** và cấp cho Bot các quyền sau:\n"
             f"{missing_str}",
             ephemeral=True
@@ -1563,7 +1563,7 @@ async def setup_here(interaction: discord.Interaction):
     await bot.update_control_panel(target_channel=target_channel)
 
     channel_mention = getattr(target_channel, "mention", f"<#{target_channel.id}>")
-    await interaction.followup.send(f"✅ **Đã thiết lập Bảng điều khiển thành công NGAY tại kênh:** {channel_mention}", ephemeral=True)
+    await interaction.followup.send(f"{config.EMOJI_SUCCESS} **Đã thiết lập Bảng điều khiển thành công NGAY tại kênh:** {channel_mention}", ephemeral=True)
 
 
 def get_bot_invite_url(bot):
@@ -1606,7 +1606,7 @@ async def start_command(interaction: discord.Interaction):
 
     if not server_channel_id:
         await interaction.response.send_message(
-            "❌ **Server này chưa có kênh hoạt động!** Bot sẽ tự tạo Bảng điều khiển khi được mời vào server; "
+            f"{config.EMOJI_FAIL} **Server này chưa có kênh hoạt động!** Bot sẽ tự tạo Bảng điều khiển khi được mời vào server; "
             "nếu chưa thấy, hãy nhờ chủ server mời lại bot bằng `/invite`.",
             ephemeral=True
         )
@@ -1635,7 +1635,7 @@ async def start_command(interaction: discord.Interaction):
 @bot.tree.command(name="status", description="[Admin] Xem danh sách người dùng đang chạy và trạng thái hệ thống")
 async def show_status(interaction: discord.Interaction):
     if not is_admin_or_owner(interaction):
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     from txa_layout import StatusLayoutView
@@ -1649,7 +1649,7 @@ async def show_status(interaction: discord.Interaction):
 @app_commands.default_permissions(administrator=True)
 async def view_config(interaction: discord.Interaction):
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     from txa_layout import ConfigLayoutView
@@ -1679,7 +1679,7 @@ async def cmd_admin_bypass(ctx: commands.Context, enabled: str = None):
         title="⚙️ Cập Nhật Cấu Hình Admin Bypass",
         color=discord.Color.green() if is_on else discord.Color.orange(),
         description=(
-            f"✅ Đã cập nhật `ADMIN_BYPASS_LIMIT` thành: {status_txt}\n\n"
+            f"{config.EMOJI_SUCCESS} Đã cập nhật `ADMIN_BYPASS_LIMIT` thành: {status_txt}\n\n"
             f"• **RAM:** Áp dụng ngay lập tức\n"
             f"• **File:** Đã lưu vào file `.env`"
         ),
@@ -1699,7 +1699,7 @@ async def cmd_set_env(ctx: commands.Context, key: str = None, value: str = None)
         pass
 
     if not key or not value:
-        await ctx.send("❌ Cú pháp: `!set_env <KEY> <VALUE>` (Ví dụ: `!set_env ADMIN_BYPASS_LIMIT False`)", delete_after=10)
+        await ctx.send(f"{config.EMOJI_FAIL} Cú pháp: `!set_env <KEY> <VALUE>` (Ví dụ: `!set_env ADMIN_BYPASS_LIMIT False`)", delete_after=10)
         return
 
     clean_key = key.strip().upper()
@@ -1707,11 +1707,11 @@ async def cmd_set_env(ctx: commands.Context, key: str = None, value: str = None)
 
     if clean_key in ("ADMIN_BYPASS_LIMIT", "AUTO_ACCEPT", "LOG_PROGRESS", "DEBUG"):
         if clean_val.lower() not in ("true", "false", "1", "0", "yes", "no"):
-            await ctx.send(f"❌ Biến `{clean_key}` chỉ chấp nhận giá trị `True` hoặc `False`.", delete_after=10)
+            await ctx.send(f"{config.EMOJI_FAIL} Biến `{clean_key}` chỉ chấp nhận giá trị `True` hoặc `False`.", delete_after=10)
             return
     elif clean_key in ("POLL_INTERVAL", "HEARTBEAT_INTERVAL"):
         if not clean_val.isdigit() or int(clean_val) < 1:
-            await ctx.send(f"❌ Biến `{clean_key}` phải là số nguyên dương (giây).", delete_after=10)
+            await ctx.send(f"{config.EMOJI_FAIL} Biến `{clean_key}` phải là số nguyên dương (giây).", delete_after=10)
             return
 
     config.update_env_variable(clean_key, clean_val)
@@ -1719,7 +1719,7 @@ async def cmd_set_env(ctx: commands.Context, key: str = None, value: str = None)
         title="⚙️ Đã Cập Nhật Biến Môi Trường",
         color=discord.Color.green(),
         description=(
-            f"✅ Biến **`{clean_key}`** đã được đặt thành: **`{clean_val}`**\n\n"
+            f"{config.EMOJI_SUCCESS} Biến **`{clean_key}`** đã được đặt thành: **`{clean_val}`**\n\n"
             f"• **RAM:** Áp dụng ngay lập tức\n"
             f"• **File:** Đã ghi vào `.env` vĩnh viễn"
         ),
@@ -1734,15 +1734,15 @@ async def cmd_set_env(ctx: commands.Context, key: str = None, value: str = None)
 @app_commands.describe(user_discord_id="Chọn hoặc nhập ID Discord của người dùng", balance="Số lượt quest muốn đặt (ví dụ: 5)")
 async def set_limit_command(interaction: discord.Interaction, user_discord_id: str, balance: int):
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin mới có quyền.", ephemeral=True)
         return
 
     if not user_discord_id.isdigit():
-        await interaction.response.send_message("❌ ID người dùng không hợp lệ.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} ID người dùng không hợp lệ.", ephemeral=True)
         return
 
     if balance < 0:
-        await interaction.response.send_message("❌ Số lượt phải lớn hơn hoặc bằng 0.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} Số lượt phải lớn hơn hoặc bằng 0.", ephemeral=True)
         return
 
     from limits_manager import load_limits, save_limits
@@ -1815,7 +1815,7 @@ async def set_limit_autocomplete(
 @app_commands.default_permissions(administrator=True)
 async def clear_cache_command(interaction: discord.Interaction):
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin mới có quyền.", ephemeral=True)
         return
 
     import shutil
@@ -1862,7 +1862,7 @@ async def clear_cache_command(interaction: discord.Interaction):
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
-        await interaction.response.send_message(f"❌ Có lỗi xảy ra khi xóa cache: `{e}`", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} Có lỗi xảy ra khi xóa cache: `{e}`", ephemeral=True)
 
 
 async def get_stop_user_choices(
@@ -1910,16 +1910,16 @@ async def get_stop_user_choices(
 @app_commands.describe(user_discord_id="Chọn người dùng đang có phiên chạy cần dừng")
 async def stop_user(interaction: discord.Interaction, user_discord_id: str):
     if not is_admin_or_owner(interaction):
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     if user_discord_id == "none" or not user_discord_id.isdigit():
-        await interaction.response.send_message("❌ Vui lòng chọn một phiên hoạt động hợp lệ từ danh sách gợi ý.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} Vui lòng chọn một phiên hoạt động hợp lệ từ danh sách gợi ý.", ephemeral=True)
         return
 
     uid = int(user_discord_id)
     if uid not in config.ACTIVE_USERS:
-        await interaction.response.send_message("❌ Người dùng này hiện không hoạt động hoặc phiên đã kết thúc trước đó.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} Người dùng này hiện không hoạt động hoặc phiên đã kết thúc trước đó.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -1941,9 +1941,9 @@ async def stop_user(interaction: discord.Interaction, user_discord_id: str):
             log(f"Lỗi dừng user: {e}", "warn")
 
         await bot.update_control_panel()
-        await interaction.followup.send(f"✅ **Đã dừng tiến trình hoạt động của:** **{info['username']}** (ID: `{uid}`)", ephemeral=True)
+        await interaction.followup.send(f"{config.EMOJI_SUCCESS} **Đã dừng tiến trình hoạt động của:** **{info['username']}** (ID: `{uid}`)", ephemeral=True)
     else:
-        await interaction.followup.send("❌ Phiên chạy đã kết thúc.", ephemeral=True)
+        await interaction.followup.send(f"{config.EMOJI_FAIL} Phiên chạy đã kết thúc.", ephemeral=True)
 
 
 @stop_user.autocomplete("user_discord_id")
@@ -1992,7 +1992,7 @@ class QuestClaimView(discord.ui.View):
     def make_callback(self, quest_id, quest_name):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.user_id:
-                await interaction.response.send_message("❌ Nút bấm này không dành cho bạn.", ephemeral=True)
+                await interaction.response.send_message(f"{config.EMOJI_FAIL} Nút bấm này không dành cho bạn.", ephemeral=True)
                 return
 
             await interaction.response.defer(ephemeral=True)
@@ -2039,7 +2039,7 @@ async def user_info_command(interaction: discord.Interaction):
     if user_id not in config.ACTIVE_USERS:
         channel_mention = panel_mention_for_user(interaction.user.id)
         await interaction.response.send_message(
-            f"❌ **Bạn hiện không có phiên hoạt động nào!**\n"
+            f"{config.EMOJI_FAIL} **Bạn hiện không có phiên hoạt động nào!**\n"
             f"Vui lòng truy cập {channel_mention} để bắt đầu.",
             ephemeral=True
         )
@@ -2052,7 +2052,7 @@ async def user_info_command(interaction: discord.Interaction):
     r = await api.get("/users/@me")
     if r.status != 200:
         await interaction.followup.send(
-            "❌ Không thể truy xuất thông tin tài khoản từ Discord API.",
+            f"{config.EMOJI_FAIL} Không thể truy xuất thông tin tài khoản từ Discord API.",
             ephemeral=True
         )
         return
@@ -2132,7 +2132,7 @@ async def stop_my_session(interaction: discord.Interaction):
     if user_id not in config.ACTIVE_USERS:
         channel_mention = panel_mention_for_user(interaction.user.id)
         await interaction.response.send_message(
-            f"❌ **Tài khoản của bạn hiện không có phiên hoạt động nào đang chạy!**\n"
+            f"{config.EMOJI_FAIL} **Tài khoản của bạn hiện không có phiên hoạt động nào đang chạy!**\n"
             f"Vui lòng truy cập {channel_mention} để bắt đầu.",
             ephemeral=True
         )
@@ -2161,7 +2161,7 @@ async def stop_my_session(interaction: discord.Interaction):
 @app_commands.default_permissions(administrator=True)
 async def qr_test(interaction: discord.Interaction):
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -2182,11 +2182,11 @@ async def qr_test(interaction: discord.Interaction):
 @app_commands.describe(price="Đơn giá mới cho mỗi lượt (ví dụ: 10000)")
 async def set_price(interaction: discord.Interaction, price: int):
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     if price <= 0:
-        await interaction.response.send_message("❌ Đơn giá phải lớn hơn 0.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} Đơn giá phải lớn hơn 0.", ephemeral=True)
         return
 
     from limits_manager import set_price_per_quest
@@ -2199,7 +2199,7 @@ async def set_price(interaction: discord.Interaction, price: int):
         for q in PACKAGES
     )
     await interaction.response.send_message(view=text_card(
-        interaction.user.id, "✅ Đã Cập Nhật Đơn Giá",
+        interaction.user.id, f"{config.EMOJI_SUCCESS} Đã Cập Nhật Đơn Giá",
         f"Đơn giá mới: **{price:,} VNĐ** / lượt.\n\n**🎁 Ưu đãi mới (vừa quay ngẫu nhiên):**\n{table}",
         footer="Đổi giá sẽ tự quay lại mức giảm của các gói"
     ), ephemeral=True)
@@ -2211,11 +2211,11 @@ async def set_price(interaction: discord.Interaction, price: int):
 @app_commands.describe(minutes="Thời gian hết hạn tính bằng phút (ví dụ: 5)")
 async def set_timeout(interaction: discord.Interaction, minutes: int):
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin được cấu hình mới có quyền.", ephemeral=True)
         return
 
     if minutes <= 0:
-        await interaction.response.send_message("❌ Thời gian hết hạn phải lớn hơn 0 phút.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} Thời gian hết hạn phải lớn hơn 0 phút.", ephemeral=True)
         return
 
     from limits_manager import set_transaction_timeout
@@ -2224,7 +2224,7 @@ async def set_timeout(interaction: discord.Interaction, minutes: int):
     
     from txa_layout import text_card
     await interaction.response.send_message(view=text_card(
-        interaction.user.id, "✅ Đã Cập Nhật Thời Hạn Hóa Đơn",
+        interaction.user.id, f"{config.EMOJI_SUCCESS} Đã Cập Nhật Thời Hạn Hóa Đơn",
         f"Mã QR hóa đơn sẽ hết hạn sau **{minutes} phút** ({seconds} giây).",
         footer="Áp dụng cho các hóa đơn tạo từ bây giờ"
     ), ephemeral=True)
@@ -2266,13 +2266,13 @@ async def ping_command(interaction: discord.Interaction):
 @app_commands.describe(user_discord_id="Chọn hoặc nhập ID Discord của người nhận", amount="Số lượt cộng thêm (số âm để trừ bớt)")
 async def add_balance_command(interaction: discord.Interaction, user_discord_id: str, amount: int):
     if interaction.user.id not in config.ADMIN_IDS:
-        await interaction.response.send_message("❌ **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin mới có quyền.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} **Bạn không có quyền thực hiện lệnh này!** Chỉ Admin mới có quyền.", ephemeral=True)
         return
     if not user_discord_id.isdigit():
-        await interaction.response.send_message("❌ ID người dùng không hợp lệ.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} ID người dùng không hợp lệ.", ephemeral=True)
         return
     if amount == 0:
-        await interaction.response.send_message("❌ Số lượt cộng phải khác 0.", ephemeral=True)
+        await interaction.response.send_message(f"{config.EMOJI_FAIL} Số lượt cộng phải khác 0.", ephemeral=True)
         return
 
     from limits_manager import load_limits, save_limits

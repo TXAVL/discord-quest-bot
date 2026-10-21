@@ -121,11 +121,11 @@ class TxaView(discord.ui.LayoutView):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if self.admin_only:
             if interaction.user.id not in config.ADMIN_IDS:
-                await interaction.response.send_message("❌ Chỉ Admin được dùng bảng này.", ephemeral=True)
+                await interaction.response.send_message(f"{config.EMOJI_FAIL} Chỉ Admin được dùng bảng này.", ephemeral=True)
                 return False
             return True
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Bảng này không dành cho bạn.", ephemeral=True)
+            await interaction.response.send_message(f"{config.EMOJI_FAIL} Bảng này không dành cho bạn.", ephemeral=True)
             return False
         return True
 
@@ -333,12 +333,12 @@ class CustomValueModal(discord.ui.Modal):
         lo, hi, unit = self.spec["min"], self.spec["max"], self.spec["unit"]
         if number is None or not (lo <= number <= hi):
             await interaction.response.send_message(
-                f"❌ Giá trị không hợp lệ. Hãy nhập một số từ **{lo:,}** đến **{hi:,}** {unit} (ví dụ `{self.example}`).",
+                f"{config.EMOJI_FAIL} Giá trị không hợp lệ. Hãy nhập một số từ **{lo:,}** đến **{hi:,}** {unit} (ví dụ `{self.example}`).",
                 ephemeral=True
             )
             return
         self.item["set"](str(number))
-        self.layout.note = f"✅ Đã đặt **{self.item['label']}** = **{_label_of(self.item, str(number))}** (nhập tay)"
+        self.layout.note = f"{config.EMOJI_SUCCESS} Đã đặt **{self.item['label']}** = **{_label_of(self.item, str(number))}** (nhập tay)"
         self.layout.build()
         await interaction.response.edit_message(view=self.layout)
 
@@ -385,7 +385,7 @@ class SettingSelect(discord.ui.Select):
             await interaction.response.send_modal(CustomValueModal(self.layout, self.item))
             return
         self.item["set"](value)
-        self.layout.note = f"✅ Đã đặt **{self.item['label']}** = **{_label_of(self.item, value)}**"
+        self.layout.note = f"{config.EMOJI_SUCCESS} Đã đặt **{self.item['label']}** = **{_label_of(self.item, value)}**"
         self.layout.build()
         await interaction.response.edit_message(view=self.layout)
 
@@ -535,13 +535,13 @@ class StatusLayoutView(TxaView):
         done = data.get("total_completed", config.TOTAL_COMPLETED)
         failed = data.get("total_failed", config.TOTAL_FAILED)
         pending = len(get_pending_transactions())
-        on = lambda v: "✅ Bật" if v else "❌ Tắt"
+        on = lambda v: f"{config.EMOJI_SUCCESS} Bật" if v else f"{config.EMOJI_FAIL} Tắt"
 
         items = [
             f"### 📡 Bảng Điều Khiển Admin {config.EMOJI_ROCKET}",
             self.note,
             f"{'🟢' if count else '⚪'} **{count:02d}** phiên đang chạy\n"
-            f"✅ **{done:02d}** thành công  •  ❌ **{failed:02d}** thất bại  •  🧾 **{pending:02d}** đơn chờ thanh toán",
+            f"{config.EMOJI_SUCCESS} **{done:02d}** thành công  •  ❌ **{failed:02d}** thất bại  •  🧾 **{pending:02d}** đơn chờ thanh toán",
             "---",
         ]
         if not users:
@@ -1159,7 +1159,7 @@ class MenuLayoutView(TxaView):
             from payment_views import get_limit_embed_and_view, register_invoice
             if not create_transaction(uid, int(self.picks[1])):
                 await interaction.response.send_message(
-                    "❌ Bạn đang có một hóa đơn chưa hoàn tất. Dùng `/buy` để xem hoặc hủy nó.", ephemeral=True)
+                    f"{config.EMOJI_FAIL} Bạn đang có một hóa đơn chưa hoàn tất. Dùng `/buy` để xem hoặc hủy nó.", ephemeral=True)
                 return
             _, view = get_limit_embed_and_view(uid, back=me)
             await self.go(interaction, view)
