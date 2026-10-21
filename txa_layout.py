@@ -673,20 +673,34 @@ class SystemLayoutView(TxaView):
     def start(self, interaction: discord.Interaction):
         """Gọi sau khi gửi/sửa tin nhắn để bắt đầu vòng cập nhật realtime."""
         self._interaction = interaction
-        asyncio.create_task(self._loop())
+        task = getattr(self, "_task", None)
+        if task and not task.done():
+            task.cancel()  # tránh nhiều vòng lặp chồng nhau
+        self._task = asyncio.create_task(self._loop())
 
     async def _loop(self):
+        from logger import log
         began = time.time()
-        try:
-            while self.live and time.time() - began < self.MAX_LIVE_SECONDS:
-                await asyncio.sleep(self.REFRESH_SECONDS)
-                if not self.live:
-                    return
+        failures = 0
+        while self.live and time.time() - began < self.MAX_LIVE_SECONDS:
+            await asyncio.sleep(self.REFRESH_SECONDS)
+            if not self.live:
+                return
+            try:
                 self.build()
                 await self._interaction.edit_original_response(view=self)
-        except Exception:
-            pass
-        if self.live:  # hết thời gian sống của token
+                failures = 0
+            except asyncio.CancelledError:
+                raise
+            except (discord.NotFound, discord.Forbidden):
+                self.live = False  # tin nhắn đã bị xóa/đóng
+                return
+            except Exception as e:  # lỗi tạm thời (rate limit, mạng...) -> thử lại thay vì đứng im
+                failures += 1
+                log(f"System Monitor live lỗi lần {failures}: {e}", "warn")
+                if failures >= 5:
+                    break
+        if self.live:  # hết thời gian sống của token hoặc lỗi liên tục -> báo tạm dừng thay vì đứng im
             self.live = False
             try:
                 self.build()
