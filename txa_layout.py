@@ -426,7 +426,7 @@ class ConfigLayoutView(TxaView):
         items = []
         if self.page == "home" or self.page not in groups:
             self.page = "home"
-            items += ["### ⚙️ Cài đặt Chung", self.note, self._summary(), "---", "**Chọn nhóm cài đặt**"]
+            items += [f"### ⚙️ Cài đặt Chung {config.EMOJI_ROCKET}", self.note, self._summary(), "---", "**Chọn nhóm cài đặt**"]
             row = discord.ui.ActionRow()
             row.add_item(GroupSelect(self, groups))
             items += [row, "-# Chọn nhóm rồi chỉnh trực tiếp bằng menu. Thay đổi áp dụng ngay và được lưu lại."]
@@ -538,7 +538,7 @@ class StatusLayoutView(TxaView):
         on = lambda v: "✅ Bật" if v else "❌ Tắt"
 
         items = [
-            "### 📡 Bảng Điều Khiển Admin",
+            f"### 📡 Bảng Điều Khiển Admin {config.EMOJI_ROCKET}",
             self.note,
             f"{'🟢' if count else '⚪'} **{count:02d}** phiên đang chạy\n"
             f"✅ **{done:02d}** thành công  •  ❌ **{failed:02d}** thất bại  •  🧾 **{pending:02d}** đơn chờ thanh toán",
@@ -639,7 +639,7 @@ class SystemLayoutView(TxaView):
 
         status = "🔴 **LIVE** • tự cập nhật mỗi 03 giây" if self.live else "⏸️ Đã tạm dừng cập nhật"
         self.add_item(box(
-            "### ⚡ System Monitor",
+            f"### ⚡ System Monitor {config.EMOJI_LOADING}",
             f"{status}\n🕒 Online từ <t:{int(self.bot_start_time)}:R> • Uptime **{uptime_str}**",
             f"```\nCPU   {cpu['percent']:>5.1f}%  {slider_bar(cpu['percent'])}\n"
             f"RAM   {ram['percent']:>5.1f}%  {slider_bar(ram['percent'])}\n"
@@ -825,7 +825,7 @@ class HelpLayoutView(TxaView):
             row = discord.ui.ActionRow()
             row.add_item(HelpGroupSelect(self, groups))
             items = [
-                "### 📖 Trung Tâm Trợ Giúp • Quest Bot",
+                f"### 📖 Trung Tâm Trợ Giúp • Quest Bot {config.EMOJI_ROCKET}",
                 "Tự động quét • nhận • hoàn thành Discord Quest.",
                 "\n".join(f"{g[1]} **{g[0]}** • {len(g[3]):02d} lệnh\n-# {g[2]}" for g in groups.values()),
                 "---",
@@ -912,7 +912,7 @@ class ExtensionGuideView(TxaView):
             "**Lấy & Sao Chép Token** → dán token vào nút 🚀 **Bắt Đầu** trong kênh của bot."
         )
         items = [
-            "### 📦 Cài Tiện Ích Lấy Token",
+            f"### 📦 Cài Tiện Ích Lấy Token {config.EMOJI_LOADING}",
             "**TXA Discord Token Retriever** — lấy token nhanh chỉ với một cú bấm.\n"
             "Trình duyệt không cài trực tiếp được file `.crx`, nên hãy cài thủ công theo 06 bước dưới đây (khoảng 01 phút).",
             "---",
@@ -955,10 +955,10 @@ def claim_result_view(user_id: int, kind: str, quest_name: str, code: str = None
     if kind == "success":
         body = (f"🔑 **Mã quà tặng (Promo Code):**\n```\n{code}\n```\n💡 Sao chép mã trên rồi kích hoạt trong **Gift Inventory** hoặc trong game."
                 if code else "✨ Phần thưởng đã được kích hoạt trực tiếp vào tài khoản Discord của bạn!")
-        view.add_item(box("### 🎉 Nhận Quà Thành Công!", f"🎯 **Nhiệm vụ:** {quest_name}", "---", body, accent=GREEN))
+        view.add_item(box(f"### 🎉 Nhận Quà Thành Công! {config.EMOJI_SUCCESS}", f"🎯 **Nhiệm vụ:** {quest_name}", "---", body, accent=GREEN))
     elif kind == "captcha":
         view.add_item(box(
-            "### 🛡️ Cần Bạn Bấm Nhận Trên Discord",
+            f"### 🛡️ Cần Bạn Bấm Nhận Trên Discord {config.EMOJI_LOADING}",
             f"🎯 **Nhiệm vụ:** {quest_name}\n🎉 Tiến độ đã hoàn thành **100%** — quà vẫn nằm an toàn trên tài khoản của bạn.",
             "---",
             "**❓ Vì sao bot không tự nhận được?**\n"
@@ -976,7 +976,7 @@ def claim_result_view(user_id: int, kind: str, quest_name: str, code: str = None
         return view
     else:
         view.add_item(box(
-            "### ❌ Không Thể Nhận Quà",
+            f"### Không Thể Nhận Quà {config.EMOJI_FAIL}",
             f"🎯 **Nhiệm vụ:** {quest_name}",
             f"```\n{(detail or 'Lỗi không xác định')[:500]}\n```",
             "Hãy thử lại sau ít phút, hoặc nhận trực tiếp trên Discord.",
@@ -1022,7 +1022,7 @@ def embed_to_view(embed: discord.Embed, user_id: int, links=()) -> TxaView:
 def invite_view(user_id: int) -> TxaView:
     view = TxaView(user_id, timeout=300)
     view.add_item(box(
-        "### ➕ Thêm Quest Bot Vào Server Của Bạn",
+        f"### ➕ Thêm Quest Bot Vào Server Của Bạn {config.EMOJI_ROCKET}",
         "Nhấn nút **Mời Bot** bên dưới để đưa bot vào máy chủ Discord của bạn.",
         "---",
         "**✨ Bạn không cần cài đặt gì thêm**\n"
@@ -1124,7 +1124,7 @@ class MenuLayoutView(TxaView):
         self.clear_items()
         nodes = self._path()
         crumbs = " ➜ ".join(f"{n.get('emoji', '')} {n['label']}" for n in nodes) or "*Chưa chọn gì*"
-        items = ["### 🧭 Trung Tâm Điều Khiển Quest Bot",
+        items = [f"### 🧭 Trung Tâm Điều Khiển Quest Bot {config.EMOJI_ROCKET}",
                  "Chọn lần lượt từng mục. Menu sau sẽ đổi theo lựa chọn trước đó.",
                  f"**📍 Lựa chọn của bạn:** {crumbs}", "---"]
         level_nodes = self.tree
@@ -1147,7 +1147,7 @@ class MenuLayoutView(TxaView):
             await interaction.response.edit_message(view=self)
 
         self.add_item(self.nav_row(extra=[
-            btn("Xác Nhận", "✅", self._confirm, style=discord.ButtonStyle.success, disabled=not self._ready()),
+            btn("Xác Nhận", config.EMOJI_SUCCESS, self._confirm, style=discord.ButtonStyle.success, disabled=not self._ready()),
             btn("Đặt Lại", "🔄", reset, disabled=not self.picks),
         ]))
 
