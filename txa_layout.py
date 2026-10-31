@@ -507,6 +507,11 @@ class StopSessionSelect(discord.ui.Select):
                 await self.bot.update_control_panel()
             except Exception:
                 pass
+            try:
+                from bot import update_admin_live_monitor
+                await update_admin_live_monitor(self.bot, force=True)
+            except Exception:
+                pass
             self.layout.note = f"🛑 Đã dừng phiên của **{info.get('username')}** (`{uid}`)"
         else:
             self.layout.note = "ℹ️ Phiên này đã kết thúc trước đó."
